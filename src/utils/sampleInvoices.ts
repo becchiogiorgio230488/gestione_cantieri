@@ -547,7 +547,7 @@ export const SAMPLE_ISSUED_INVOICES: SampleIssuedInvoice[] = [
         <Divisa>EUR</Divisa>
         <Data>2026-03-01</Data>
         <Numero>FT-EM/2026-04</Numero>
-        <ImportoTotaleDocumento>8500.00</ImportoTotaleDocumento>
+        <ImportoTotaleDocumento>10370.00</ImportoTotaleDocumento>
         <Causale>SAL 1 realizzazione impianto elettrico e cablaggio domotico</Causale>
       </DatiGeneraliDocumento>
       <DatiTrasporto>
@@ -566,11 +566,116 @@ export const SAMPLE_ISSUED_INVOICES: SampleIssuedInvoice[] = [
         <Quantita>1.00</Quantita>
         <PrezzoUnitario>8500.00</PrezzoUnitario>
         <PrezzoTotale>8500.00</PrezzoTotale>
+        <AliquotaIVA>22.00</AliquotaIVA>
         <AltriDatiGestionali>
           <TipoDato>CANTIERE</TipoDato>
           <RiferimentoTesto>Via Monte Napoleone 18, Monza (MB)</RiferimentoTesto>
         </AltriDatiGestionali>
       </DettaglioLinee>
+      <DatiRiepilogo>
+        <AliquotaIVA>22.00</AliquotaIVA>
+        <ImponibileImporto>8500.00</ImponibileImporto>
+        <Imposta>1870.00</Imposta>
+      </DatiRiepilogo>
+    </DatiBeniServizi>
+  </FatturaElettronicaBody>
+</p:FatturaElettronica>`
+  },
+  {
+    name: 'Fattura Emessa con 2 Aliquote IVA (10% e 22% - Totale Imponibili)',
+    scenario: 'Fattura con IVA 10% (manutenzione) e 22% (materiali): importa solo la somma dei due imponibili (€ 5.000,00).',
+    client: 'RESIDENZA LE VILLE S.R.L.',
+    headerAddress: 'Corso Sempione 45, 20145 Milano (MI)',
+    bodyAddress: 'Via Roma 40, 20900 Monza (MB)',
+    ruleExpected: 'corpo_diverso',
+    amount: 5000.00,
+    xml: `<?xml version="1.0" encoding="UTF-8"?>
+<p:FatturaElettronica versione="FPR12" xmlns:p="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2">
+  <FatturaElettronicaHeader>
+    <DatiTrasmissione>
+      <IdTrasmittente><IdPaese>IT</IdPaese><IdCodice>01234567890</IdCodice></IdTrasmittente>
+      <ProgressivoInvio>EMES202604</ProgressivoInvio>
+      <FormatoTrasmissione>FPR12</FormatoTrasmissione>
+      <CodiceDestinatario>ABC1234</CodiceDestinatario>
+    </DatiTrasmissione>
+    <CedentePrestatore>
+      <DatiAnagrafici>
+        <IdFiscaleIVA><IdPaese>IT</IdPaese><IdCodice>01234567890</IdCodice></IdFiscaleIVA>
+        <Anagrafica><Denominazione>SIRNA MASSIMO IMPIANTI ELETTRICI</Denominazione></Anagrafica>
+      </DatiAnagrafici>
+      <Sede>
+        <Indirizzo>Via Padova 120</Indirizzo>
+        <CAP>20127</CAP>
+        <Comune>Milano</Comune>
+        <Provincia>MI</Provincia>
+        <Nazione>IT</Nazione>
+      </Sede>
+    </CedentePrestatore>
+    <CessionarioCommittente>
+      <DatiAnagrafici>
+        <IdFiscaleIVA><IdPaese>IT</IdPaese><IdCodice>08899110156</IdCodice></IdFiscaleIVA>
+        <CodiceFiscale>08899110156</CodiceFiscale>
+        <Anagrafica><Denominazione>RESIDENZA LE VILLE S.R.L.</Denominazione></Anagrafica>
+      </DatiAnagrafici>
+      <Sede>
+        <Indirizzo>Corso Sempione 45</Indirizzo>
+        <CAP>20145</CAP>
+        <Comune>Milano</Comune>
+        <Provincia>MI</Provincia>
+        <Nazione>IT</Nazione>
+      </Sede>
+    </CessionarioCommittente>
+  </FatturaElettronicaHeader>
+  <FatturaElettronicaBody>
+    <DatiGenerali>
+      <DatiGeneraliDocumento>
+        <TipoDocumento>TD01</TipoDocumento>
+        <Divisa>EUR</Divisa>
+        <Data>2026-03-15</Data>
+        <Numero>FT-EM/2026-08</Numero>
+        <ImportoTotaleDocumento>5680.00</ImportoTotaleDocumento>
+        <Causale>Lavori impianto elettrico con IVA 10% ed elettrodomestici/domotica IVA 22%</Causale>
+      </DatiGeneraliDocumento>
+      <DatiTrasporto>
+        <IndirizzoResa>
+          <Indirizzo>Via Roma 40</Indirizzo>
+          <CAP>20900</CAP>
+          <Comune>Monza</Comune>
+          <Provincia>MB</Provincia>
+        </IndirizzoResa>
+      </DatiTrasporto>
+    </DatiGenerali>
+    <DatiBeniServizi>
+      <DettaglioLinee>
+        <NumeroLinea>1</NumeroLinea>
+        <Descrizione>Manodopera e impianti elettrici (Aliquota agevolata 10%)</Descrizione>
+        <Quantita>1.00</Quantita>
+        <PrezzoUnitario>3500.00</PrezzoUnitario>
+        <PrezzoTotale>3500.00</PrezzoTotale>
+        <AliquotaIVA>10.00</AliquotaIVA>
+        <AltriDatiGestionali>
+          <TipoDato>CANTIERE</TipoDato>
+          <RiferimentoTesto>Via Roma 40, Monza (MB)</RiferimentoTesto>
+        </AltriDatiGestionali>
+      </DettaglioLinee>
+      <DettaglioLinee>
+        <NumeroLinea>2</NumeroLinea>
+        <Descrizione>Corpi illuminanti speciali e attuatori domotici (Aliquota ordinaria 22%)</Descrizione>
+        <Quantita>1.00</Quantita>
+        <PrezzoUnitario>1500.00</PrezzoUnitario>
+        <PrezzoTotale>1500.00</PrezzoTotale>
+        <AliquotaIVA>22.00</AliquotaIVA>
+      </DettaglioLinee>
+      <DatiRiepilogo>
+        <AliquotaIVA>10.00</AliquotaIVA>
+        <ImponibileImporto>3500.00</ImponibileImporto>
+        <Imposta>350.00</Imposta>
+      </DatiRiepilogo>
+      <DatiRiepilogo>
+        <AliquotaIVA>22.00</AliquotaIVA>
+        <ImponibileImporto>1500.00</ImponibileImporto>
+        <Imposta>330.00</Imposta>
+      </DatiRiepilogo>
     </DatiBeniServizi>
   </FatturaElettronicaBody>
 </p:FatturaElettronica>`

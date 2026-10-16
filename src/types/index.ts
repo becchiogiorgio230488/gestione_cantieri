@@ -95,6 +95,12 @@ export interface ParsedFatturaEmessaXML {
     importoTotale: number;
     imponibileTotale: number;
     causale?: string;
+    riepilogoIVA?: Array<{
+      aliquotaIVA: number;
+      imponibile: number;
+      imposta: number;
+      natura?: string;
+    }>;
   };
   protocolloSuggerito: string;
   righe: Array<{

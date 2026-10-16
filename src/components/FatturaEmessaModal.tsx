@@ -135,7 +135,11 @@ export const FatturaEmessaModal: React.FC<FatturaEmessaModalProps> = ({
       // REGOLA 1: Il protocollo interno studio è SEMPRE il numero di fattura (es. 2/00 -> 2/00)
       setProtocol(invoiceNumber);
       setDate(parsed.datiDocumento.data || getTodayISODate());
-      setAmount(String(parsed.datiDocumento.importoTotale));
+      // REGOLA: Importa solo l'imponibile; se ci sono due o più aliquote IVA, importa la somma di tutti gli imponibili
+      const taxableToImport = parsed.datiDocumento.imponibileTotale > 0
+        ? parsed.datiDocumento.imponibileTotale
+        : parsed.datiDocumento.importoTotale;
+      setAmount(taxableToImport.toFixed(2));
       // REGOLA 5: Nella descrizione del cantiere basta scrivere EMESSE
       setDescription('EMESSE');
       // REGOLA 3: Solo via e civico senza dati catastali
@@ -485,6 +489,78 @@ export const FatturaEmessaModal: React.FC<FatturaEmessaModalProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Dati Fiscali XML: Imponibile vs Totale Documento */}
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                  <Receipt className="h-4 w-4 text-emerald-400" />
+                  <span>Dati Fiscali XML: Solo Imponibile (Regola Contabile)</span>
+                </span>
+                <span
+                  className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                    parsedXml.datiDocumento.riepilogoIVA && parsedXml.datiDocumento.riepilogoIVA.length > 1
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  }`}
+                >
+                  {parsedXml.datiDocumento.riepilogoIVA && parsedXml.datiDocumento.riepilogoIVA.length > 1
+                    ? `${parsedXml.datiDocumento.riepilogoIVA.length} Aliquote IVA (Totale Imponibili)`
+                    : 'Importa Solo Imponibile'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                {/* 1. Imponibile Importato */}
+                <div className="p-3 rounded-lg bg-slate-900 border border-emerald-500/30">
+                  <span className="text-[10px] uppercase font-bold text-emerald-400 block">
+                    Totale Imponibile (Da Importare):
+                  </span>
+                  <div className="text-emerald-300 font-mono font-extrabold text-base mt-0.5">
+                    {formatCurrency(parsedXml.datiDocumento.imponibileTotale)}
+                  </div>
+                  <span className="text-[10px] text-slate-400 block mt-0.5">
+                    Registrato nella colonna EMESSE del cantiere
+                  </span>
+                </div>
+
+                {/* 2. Totale Documento Lordo */}
+                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                    Totale Fattura (Con IVA):
+                  </span>
+                  <div className="text-slate-300 font-mono font-bold text-base mt-0.5">
+                    {formatCurrency(parsedXml.datiDocumento.importoTotale)}
+                  </div>
+                  <span className="text-[10px] text-slate-500 block mt-0.5">
+                    Importo lordo comprensivo di imposta
+                  </span>
+                </div>
+
+                {/* 3. Dettaglio Aliquote IVA */}
+                <div className="p-3 rounded-lg bg-slate-900 border border-slate-800">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                    Riepilogo IVA Documento:
+                  </span>
+                  {parsedXml.datiDocumento.riepilogoIVA && parsedXml.datiDocumento.riepilogoIVA.length > 0 ? (
+                    <div className="space-y-1 mt-1 font-mono text-[11px]">
+                      {parsedXml.datiDocumento.riepilogoIVA.map((r, i) => (
+                        <div key={i} className="flex justify-between items-center text-slate-300">
+                          <span>IVA {r.aliquotaIVA}%:</span>
+                          <span className="font-semibold text-emerald-300">
+                            imp. {formatCurrency(r.imponibile)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-slate-300 font-mono text-xs mt-1">
+                      Imponibile: {formatCurrency(parsedXml.datiDocumento.imponibileTotale)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -712,8 +788,17 @@ export const FatturaEmessaModal: React.FC<FatturaEmessaModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
-                    Importo Emesso (Ricavo Cantiere) *
+                  <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
+                    <span>Importo Emesso (Solo Imponibile) *</span>
+                    {parsedXml?.datiDocumento.riepilogoIVA && parsedXml.datiDocumento.riepilogoIVA.length > 1 ? (
+                      <span className="text-[10px] text-amber-300 font-bold bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/30">
+                        {parsedXml.datiDocumento.riepilogoIVA.length} Aliquote IVA (Tot. Imponibili)
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-emerald-400 font-semibold">
+                        Imponibile (IVA Esclusa)
+                      </span>
+                    )}
                   </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold">€</span>
@@ -726,6 +811,9 @@ export const FatturaEmessaModal: React.FC<FatturaEmessaModalProps> = ({
                       required
                     />
                   </div>
+                  <p className="text-[10px] text-emerald-400 mt-1">
+                    Viene importato solo l'imponibile; con due o più aliquote IVA viene registrata la somma dei relativi imponibili.
+                  </p>
                 </div>
 
                 <div>

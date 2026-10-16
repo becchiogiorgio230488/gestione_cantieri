@@ -472,8 +472,50 @@ export function parseFatturaEmessaXML(xmlString: string, fileName = 'fattura_eme
     }
   }
 
-  if (importoTotale === 0 && calculatedImponibileSum > 0) {
-    importoTotale = Math.round(calculatedImponibileSum * 1.22 * 100) / 100;
+  // 3c. Check DatiRiepilogo (Riepilogo IVA per aliquota e calcolo totale imponibili)
+  const datiRiepilogoElements = getElements(xmlDoc, 'DatiRiepilogo');
+  const riepilogoIVA: Array<{
+    aliquotaIVA: number;
+    imponibile: number;
+    imposta: number;
+    natura?: string;
+  }> = [];
+  let sumImponibiliRiepilogo = 0;
+
+  for (const rEl of datiRiepilogoElements) {
+    const aliquotaIVAStr = getTagText(rEl, 'AliquotaIVA');
+    const imponibileStr = getTagText(rEl, 'ImponibileImporto');
+    const impostaStr = getTagText(rEl, 'Imposta');
+    const natura = getTagText(rEl, 'Natura');
+
+    const aliquotaIVA = aliquotaIVAStr ? parseFloat(aliquotaIVAStr.replace(',', '.')) : 0;
+    const imponibile = imponibileStr ? parseFloat(imponibileStr.replace(',', '.')) : 0;
+    const imposta = impostaStr ? parseFloat(impostaStr.replace(',', '.')) : 0;
+
+    if (!isNaN(imponibile) && imponibile > 0) {
+      sumImponibiliRiepilogo += imponibile;
+      riepilogoIVA.push({
+        aliquotaIVA,
+        imponibile: Math.round(imponibile * 100) / 100,
+        imposta: Math.round(imposta * 100) / 100,
+        natura: natura || undefined,
+      });
+    }
+  }
+
+  // REGOLA IMPONIBILE FATTURE EMESSE:
+  // Deve importare solo l'imponibile. Se ci sono due o più aliquote IVA, importa la somma di tutti gli imponibili.
+  let finalImponibileTotale = 0;
+  if (sumImponibiliRiepilogo > 0) {
+    finalImponibileTotale = Math.round(sumImponibiliRiepilogo * 100) / 100;
+  } else if (calculatedImponibileSum > 0) {
+    finalImponibileTotale = Math.round(calculatedImponibileSum * 100) / 100;
+  } else if (importoTotale > 0) {
+    finalImponibileTotale = importoTotale;
+  }
+
+  if (importoTotale === 0 && finalImponibileTotale > 0) {
+    importoTotale = finalImponibileTotale;
   }
 
   // Clean street and civico only for corpo
@@ -535,8 +577,9 @@ export function parseFatturaEmessaXML(xmlString: string, fileName = 'fattura_eme
       numero: invoiceNum,
       data,
       importoTotale: Math.round(importoTotale * 100) / 100,
-      imponibileTotale: Math.round(calculatedImponibileSum * 100) / 100,
+      imponibileTotale: finalImponibileTotale,
       causale: causaleText || undefined,
+      riepilogoIVA: riepilogoIVA.length > 0 ? riepilogoIVA : undefined,
     },
     protocolloSuggerito,
     righe,
