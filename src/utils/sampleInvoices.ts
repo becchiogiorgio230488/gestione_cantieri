@@ -819,5 +819,81 @@ export const SAMPLE_ISSUED_INVOICES: SampleIssuedInvoice[] = [
     </DatiBeniServizi>
   </FatturaElettronicaBody>
 </p:FatturaElettronica>`
+  },
+  {
+    name: 'Nota di Credito TD04 (Storno Parziale - Importo Negativo)',
+    scenario: 'Nota di credito emessa TD04 con imponibile di storno a valore negativo per riduzione prezzo o reso su cantiere.',
+    client: 'ROSSI MARIO',
+    headerAddress: 'Via Dante 12, 20900 Monza (MB)',
+    bodyAddress: 'Via Dante 12, 20900 Monza (MB)',
+    ruleExpected: 'sede_testata',
+    amount: -1500.00,
+    xml: `<?xml version="1.0" encoding="UTF-8"?>
+<p:FatturaElettronica versione="FPR12" xmlns:p="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2">
+  <FatturaElettronicaHeader>
+    <DatiTrasmissione>
+      <IdTrasmittente><IdPaese>IT</IdPaese><IdCodice>01234567890</IdCodice></IdTrasmittente>
+      <ProgressivoInvio>NC202601</ProgressivoInvio>
+      <FormatoTrasmissione>FPR12</FormatoTrasmissione>
+      <CodiceDestinatario>0000000</CodiceDestinatario>
+    </DatiTrasmissione>
+    <CedentePrestatore>
+      <DatiAnagrafici>
+        <IdFiscaleIVA><IdPaese>IT</IdPaese><IdCodice>01234567890</IdCodice></IdFiscaleIVA>
+        <Anagrafica><Denominazione>SIRNA MASSIMO IMPIANTI ELETTRICI</Denominazione></Anagrafica>
+      </DatiAnagrafici>
+      <Sede>
+        <Indirizzo>Via Padova 120</Indirizzo>
+        <CAP>20127</CAP>
+        <Comune>Milano</Comune>
+        <Provincia>MI</Provincia>
+        <Nazione>IT</Nazione>
+      </Sede>
+    </CedentePrestatore>
+    <CessionarioCommittente>
+      <DatiAnagrafici>
+        <CodiceFiscale>RSSMRA80A01F205X</CodiceFiscale>
+        <Anagrafica>
+          <Nome>Mario</Nome>
+          <Cognome>Rossi</Cognome>
+        </Anagrafica>
+      </DatiAnagrafici>
+      <Sede>
+        <Indirizzo>Via Dante 12</Indirizzo>
+        <CAP>20900</CAP>
+        <Comune>Monza</Comune>
+        <Provincia>MB</Provincia>
+        <Nazione>IT</Nazione>
+      </Sede>
+    </CessionarioCommittente>
+  </FatturaElettronicaHeader>
+  <FatturaElettronicaBody>
+    <DatiGenerali>
+      <DatiGeneraliDocumento>
+        <TipoDocumento>TD04</TipoDocumento>
+        <Divisa>EUR</Divisa>
+        <Data>2026-03-15</Data>
+        <Numero>NC-1/26</Numero>
+        <ImportoTotaleDocumento>1830.00</ImportoTotaleDocumento>
+        <Causale>Nota di credito per storno parziale lavorazioni impianto elettrico</Causale>
+      </DatiGeneraliDocumento>
+    </DatiGenerali>
+    <DatiBeniServizi>
+      <DettaglioLinee>
+        <NumeroLinea>1</NumeroLinea>
+        <Descrizione>Storno parziale accordato per opere non eseguite cantiere Via Dante 12</Descrizione>
+        <Quantita>1.00</Quantita>
+        <PrezzoUnitario>1500.00</PrezzoUnitario>
+        <PrezzoTotale>1500.00</PrezzoTotale>
+        <AliquotaIVA>22.00</AliquotaIVA>
+      </DettaglioLinee>
+      <DatiRiepilogo>
+        <AliquotaIVA>22.00</AliquotaIVA>
+        <ImponibileImporto>1500.00</ImponibileImporto>
+        <Imposta>330.00</Imposta>
+      </DatiRiepilogo>
+    </DatiBeniServizi>
+  </FatturaElettronicaBody>
+</p:FatturaElettronica>`
   }
 ];

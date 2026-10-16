@@ -305,7 +305,7 @@ export default function App() {
 
     const invNum = extractInvoiceNumberFromMovement(movement);
     const supp = extractSupplierFromMovement(movement);
-    const isIssued = movement.issued > 0 || movement.source === 'fattura_emessa' || movement.typeAndSubject === 'EMESSE';
+    const isIssued = movement.issued !== 0 || movement.source === 'fattura_emessa' || movement.typeAndSubject.includes('EMESS');
 
     updateCurrentArtigiano((art) => {
       const nextCantieri = art.cantieri.map((c) => {

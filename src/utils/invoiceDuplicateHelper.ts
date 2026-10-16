@@ -175,7 +175,7 @@ export function findExistingIssuedInvoiceLocations(
 
   for (const c of cantieri) {
     for (const mov of c.movements || []) {
-      if (mov.issued <= 0 && mov.source !== 'fattura_emessa') continue;
+      if (mov.issued === 0 && mov.source !== 'fattura_emessa') continue;
 
       const movDoc = cleanInvoiceNum(mov.docNumber);
       const movProt = cleanInvoiceNum(mov.protocol);
@@ -222,7 +222,7 @@ export function findLinkedInvoiceMovementsAcrossCantieri(
 } {
   const invoiceNum = extractInvoiceNumberFromMovement(targetMov);
   const supplierOrClient = extractSupplierFromMovement(targetMov);
-  const isIssued = targetMov.issued > 0 || targetMov.source === 'fattura_emessa' || targetMov.typeAndSubject === 'EMESSE';
+  const isIssued = targetMov.issued !== 0 || targetMov.source === 'fattura_emessa' || targetMov.typeAndSubject.includes('EMESS');
 
   if (!invoiceNum) {
     return {
@@ -247,7 +247,7 @@ export function findLinkedInvoiceMovementsAcrossCantieri(
 
     for (const mov of c.movements || []) {
       if (isIssued) {
-        if (mov.issued <= 0 && mov.source !== 'fattura_emessa') continue;
+        if (mov.issued === 0 && mov.source !== 'fattura_emessa') continue;
         const movDoc = cleanInvoiceNum(mov.docNumber);
         if (movDoc === invoiceNum) {
           otherCantieriMatches.push({

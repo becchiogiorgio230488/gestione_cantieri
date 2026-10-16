@@ -136,9 +136,20 @@ export const FatturaEmessaModal: React.FC<FatturaEmessaModalProps> = ({
       setProtocol(invoiceNumber);
       setDate(parsed.datiDocumento.data || getTodayISODate());
       // REGOLA: Importa solo l'imponibile; se ci sono due o più aliquote IVA, importa la somma di tutti gli imponibili
-      const taxableToImport = parsed.datiDocumento.imponibileTotale > 0
+      // In caso di Nota di Credito (TD04/TD08), l'importo deve essere importato con segno negativo a storno dei ricavi
+      const isNotaCredito =
+        parsed.datiDocumento.isNotaCredito ||
+        parsed.datiDocumento.tipoDocumento === 'TD04' ||
+        parsed.datiDocumento.tipoDocumento === 'TD08';
+
+      let taxableToImport = parsed.datiDocumento.imponibileTotale !== 0
         ? parsed.datiDocumento.imponibileTotale
         : parsed.datiDocumento.importoTotale;
+
+      if (isNotaCredito && taxableToImport > 0) {
+        taxableToImport = -Math.abs(taxableToImport);
+      }
+
       setAmount(taxableToImport.toFixed(2));
       // REGOLA 5: Nella descrizione del cantiere basta scrivere EMESSE
       setDescription('EMESSE');
@@ -163,8 +174,8 @@ export const FatturaEmessaModal: React.FC<FatturaEmessaModalProps> = ({
     if (e) e.preventDefault();
 
     const numericAmount = parseFloat(amount.replace(',', '.')) || 0;
-    if (numericAmount <= 0) {
-      setFormError('Inserisci un importo valido e maggiore di zero per la fattura emessa.');
+    if (numericAmount === 0 || isNaN(numericAmount)) {
+      setFormError('Inserisci un importo valido (positivo per fattura o negativo per nota di credito TD04).');
       return;
     }
 
@@ -497,30 +508,53 @@ export const FatturaEmessaModal: React.FC<FatturaEmessaModalProps> = ({
                   <Receipt className="h-4 w-4 text-emerald-400" />
                   <span>Dati Fiscali XML: Solo Imponibile (Regola Contabile)</span>
                 </span>
-                <span
-                  className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
-                    parsedXml.datiDocumento.riepilogoIVA && parsedXml.datiDocumento.riepilogoIVA.length > 1
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                  }`}
-                >
-                  {parsedXml.datiDocumento.riepilogoIVA && parsedXml.datiDocumento.riepilogoIVA.length > 1
-                    ? `${parsedXml.datiDocumento.riepilogoIVA.length} Aliquote IVA (Totale Imponibili)`
-                    : 'Importa Solo Imponibile'}
-                </span>
+                {parsedXml.datiDocumento.isNotaCredito ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-purple-400 animate-pulse" />
+                    Nota di Credito ({parsedXml.datiDocumento.tipoDocumento}) • Importo Negativo a Storno
+                  </span>
+                ) : (
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                      parsedXml.datiDocumento.riepilogoIVA && parsedXml.datiDocumento.riepilogoIVA.length > 1
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    }`}
+                  >
+                    {parsedXml.datiDocumento.riepilogoIVA && parsedXml.datiDocumento.riepilogoIVA.length > 1
+                      ? `${parsedXml.datiDocumento.riepilogoIVA.length} Aliquote IVA (Totale Imponibili)`
+                      : 'Importa Solo Imponibile'}
+                  </span>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
                 {/* 1. Imponibile Importato */}
-                <div className="p-3 rounded-lg bg-slate-900 border border-emerald-500/30">
-                  <span className="text-[10px] uppercase font-bold text-emerald-400 block">
-                    Totale Imponibile (Da Importare):
+                <div
+                  className={`p-3 rounded-lg bg-slate-900 border ${
+                    parsedXml.datiDocumento.isNotaCredito ? 'border-purple-500/40' : 'border-emerald-500/30'
+                  }`}
+                >
+                  <span
+                    className={`text-[10px] uppercase font-bold block ${
+                      parsedXml.datiDocumento.isNotaCredito ? 'text-purple-400' : 'text-emerald-400'
+                    }`}
+                  >
+                    {parsedXml.datiDocumento.isNotaCredito
+                      ? 'Imponibile Nota Credito (Storno):'
+                      : 'Totale Imponibile (Da Importare):'}
                   </span>
-                  <div className="text-emerald-300 font-mono font-extrabold text-base mt-0.5">
+                  <div
+                    className={`font-mono font-extrabold text-base mt-0.5 ${
+                      parsedXml.datiDocumento.isNotaCredito ? 'text-purple-300' : 'text-emerald-300'
+                    }`}
+                  >
                     {formatCurrency(parsedXml.datiDocumento.imponibileTotale)}
                   </div>
                   <span className="text-[10px] text-slate-400 block mt-0.5">
-                    Registrato nella colonna EMESSE del cantiere
+                    {parsedXml.datiDocumento.isNotaCredito
+                      ? 'Importo negativo registrato nella colonna EMESSE'
+                      : 'Registrato nella colonna EMESSE del cantiere'}
                   </span>
                 </div>
 
@@ -788,31 +822,49 @@ export const FatturaEmessaModal: React.FC<FatturaEmessaModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
-                    <span>Importo Emesso (Solo Imponibile) *</span>
-                    {parsedXml?.datiDocumento.riepilogoIVA && parsedXml.datiDocumento.riepilogoIVA.length > 1 ? (
-                      <span className="text-[10px] text-amber-300 font-bold bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/30">
-                        {parsedXml.datiDocumento.riepilogoIVA.length} Aliquote IVA (Tot. Imponibili)
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-emerald-400 font-semibold">
-                        Imponibile (IVA Esclusa)
-                      </span>
-                    )}
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-slate-300 font-semibold flex items-center gap-1.5">
+                      <span>Importo Emesso (Solo Imponibile) *</span>
+                      {parseFloat(amount.replace(',', '.')) < 0 && (
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30">
+                          Nota di Credito (Negativo)
+                        </span>
+                      )}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const clean = amount.trim();
+                        if (!clean) return;
+                        if (clean.startsWith('-')) {
+                          setAmount(clean.substring(1));
+                        } else {
+                          setAmount('-' + clean);
+                        }
+                      }}
+                      className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 border border-slate-700 transition-colors cursor-pointer"
+                      title="Cambia segno tra positivo e negativo per Nota di Credito"
+                    >
+                      ± Inverti Segno (+ / -)
+                    </button>
+                  </div>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 font-bold">€</span>
                     <input
                       type="text"
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
-                      placeholder="8500.00"
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-8 pr-3 py-2 text-white font-mono font-bold text-sm focus:outline-none focus:border-amber-400"
+                      placeholder="es. 8500.00 o -1500.00"
+                      className={`w-full bg-slate-900 border rounded-lg pl-8 pr-3 py-2 font-mono font-bold text-sm focus:outline-none focus:border-amber-400 ${
+                        parseFloat(amount.replace(',', '.')) < 0
+                          ? 'text-purple-300 border-purple-500/50'
+                          : 'text-white border-slate-700'
+                      }`}
                       required
                     />
                   </div>
-                  <p className="text-[10px] text-emerald-400 mt-1">
-                    Viene importato solo l'imponibile; con due o più aliquote IVA viene registrata la somma dei relativi imponibili.
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Importa solo l'imponibile. Per le <strong className="text-purple-300">Note di Credito (TD04)</strong> l'importo è registrato con <strong className="text-purple-300">segno negativo</strong> a storno ricavi.
                   </p>
                 </div>
 

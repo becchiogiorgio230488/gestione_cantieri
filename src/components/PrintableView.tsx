@@ -124,10 +124,10 @@ export const PrintableView: React.FC<PrintableViewProps> = ({ cantiere, onBack }
                 </td>
                 <td className="p-2 border-r border-slate-200 font-mono text-[11px]">{m.protocol || '-'}</td>
                 <td className="p-2 border-r border-slate-200 text-right font-mono">
-                  {m.purchases > 0 ? formatCurrency(m.purchases) : '-'}
+                  {m.purchases !== 0 ? formatCurrency(m.purchases) : '-'}
                 </td>
-                <td className="p-2 text-right font-mono font-bold">
-                  {m.issued > 0 ? formatCurrency(m.issued) : '-'}
+                <td className={`p-2 text-right font-mono font-bold ${m.issued < 0 ? 'text-purple-700' : ''}`}>
+                  {m.issued !== 0 ? formatCurrency(m.issued) : '-'}
                 </td>
               </tr>
             ))}

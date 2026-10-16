@@ -94,6 +94,7 @@ export interface ParsedFatturaEmessaXML {
     data: string;
     importoTotale: number;
     imponibileTotale: number;
+    isNotaCredito?: boolean;
     causale?: string;
     riepilogoIVA?: Array<{
       aliquotaIVA: number;

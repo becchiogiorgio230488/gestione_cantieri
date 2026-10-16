@@ -989,12 +989,21 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
 
                       {/* ACQUISTI */}
                       <td className="py-3 px-4 text-right font-mono font-medium text-rose-300">
-                        {m.purchases > 0 ? formatCurrency(m.purchases) : '-'}
+                        {m.purchases !== 0 ? formatCurrency(m.purchases) : '-'}
                       </td>
 
                       {/* EMESSE */}
-                      <td className="py-3 px-4 text-right font-mono font-bold text-blue-300">
-                        {m.issued > 0 ? formatCurrency(m.issued) : '-'}
+                      <td className={`py-3 px-4 text-right font-mono font-bold ${m.issued < 0 ? 'text-purple-300' : 'text-blue-300'}`}>
+                        {m.issued !== 0 ? (
+                          <div className="flex items-center justify-end gap-1.5">
+                            {m.issued < 0 && (
+                              <span className="text-[10px] px-1 py-0.5 rounded bg-purple-500/20 text-purple-300 font-sans font-bold border border-purple-500/30">
+                                N.C.
+                              </span>
+                            )}
+                            <span>{formatCurrency(m.issued)}</span>
+                          </div>
+                        ) : '-'}
                       </td>
 
                       {/* AZIONI */}
@@ -1145,14 +1154,15 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                   {movementToDelete.typeAndSubject}
                 </div>
                 <div className="flex items-center gap-3 pt-1">
-                  {movementToDelete.purchases > 0 && (
+                  {movementToDelete.purchases !== 0 && (
                     <span className="text-rose-400 font-bold">
                       Costo Acquisto: {formatCurrency(movementToDelete.purchases)}
                     </span>
                   )}
-                  {movementToDelete.issued > 0 && (
-                    <span className="text-blue-400 font-bold">
-                      Fattura Emessa: {formatCurrency(movementToDelete.issued)}
+                  {movementToDelete.issued !== 0 && (
+                    <span className={movementToDelete.issued < 0 ? 'text-purple-400 font-bold' : 'text-blue-400 font-bold'}>
+                      {movementToDelete.issued < 0 ? 'Nota di Credito Emessa: ' : 'Fattura Emessa: '}
+                      {formatCurrency(movementToDelete.issued)}
                     </span>
                   )}
                 </div>
@@ -1219,8 +1229,14 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                       Doc: {linkedInvoiceToDelete.movement.docNumber} • Data: {formatDateItalian(linkedInvoiceToDelete.movement.date)}
                     </div>
                   </div>
-                  <div className="font-mono font-bold text-rose-300 whitespace-nowrap">
-                    {linkedInvoiceToDelete.movement.purchases > 0
+                  <div className={`font-mono font-bold whitespace-nowrap ${
+                    linkedInvoiceToDelete.movement.issued < 0
+                      ? 'text-purple-300'
+                      : linkedInvoiceToDelete.movement.purchases !== 0
+                      ? 'text-rose-300'
+                      : 'text-blue-300'
+                  }`}>
+                    {linkedInvoiceToDelete.movement.purchases !== 0
                       ? formatCurrency(linkedInvoiceToDelete.movement.purchases)
                       : formatCurrency(linkedInvoiceToDelete.movement.issued)}
                   </div>
@@ -1239,8 +1255,10 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                         Doc: {m.movement.docNumber} • Data: {formatDateItalian(m.movement.date)}
                       </div>
                     </div>
-                    <div className="font-mono font-bold text-slate-300 whitespace-nowrap">
-                      {m.movement.purchases > 0
+                    <div className={`font-mono font-bold whitespace-nowrap ${
+                      m.movement.issued < 0 ? 'text-purple-300' : 'text-slate-300'
+                    }`}>
+                      {m.movement.purchases !== 0
                         ? formatCurrency(m.movement.purchases)
                         : formatCurrency(m.movement.issued)}
                     </div>

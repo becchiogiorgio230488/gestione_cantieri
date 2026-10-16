@@ -401,6 +401,13 @@ export function parseFatturaEmessaXML(xmlString: string, fileName = 'fattura_eme
     }
   }
 
+  // Rilevamento Nota di Credito (TD04 o TD08 o causale di storno)
+  const isNotaCredito =
+    tipoDocumento === 'TD04' ||
+    tipoDocumento === 'TD08' ||
+    causaleText.toLowerCase().includes('nota di credito') ||
+    causaleText.toLowerCase().includes('storno');
+
   // 3. Inspect Body for Cantiere / Destination / Resa Address
   let indirizzoCorpo = '';
   let cittaCorpo = '';
@@ -433,8 +440,11 @@ export function parseFatturaEmessaXML(xmlString: string, fileName = 'fattura_eme
     const prezzoTotaleStr = getTagText(lineEl, 'PrezzoTotale');
     const aliquotaIVAStr = getTagText(lineEl, 'AliquotaIVA');
 
-    const prezzoTotale = prezzoTotaleStr ? parseFloat(prezzoTotaleStr.replace(',', '.')) : 0;
+    const rawPrezzo = prezzoTotaleStr ? parseFloat(prezzoTotaleStr.replace(',', '.')) : 0;
     const aliquotaIVA = aliquotaIVAStr ? parseFloat(aliquotaIVAStr.replace(',', '.')) : undefined;
+
+    // Se il documento è una Nota di Credito (TD04 / TD08), il prezzo totale della riga deve essere negativo
+    const prezzoTotale = isNotaCredito ? -Math.abs(rawPrezzo) : rawPrezzo;
 
     righe.push({
       numeroLinea,
@@ -489,10 +499,14 @@ export function parseFatturaEmessaXML(xmlString: string, fileName = 'fattura_eme
     const natura = getTagText(rEl, 'Natura');
 
     const aliquotaIVA = aliquotaIVAStr ? parseFloat(aliquotaIVAStr.replace(',', '.')) : 0;
-    const imponibile = imponibileStr ? parseFloat(imponibileStr.replace(',', '.')) : 0;
-    const imposta = impostaStr ? parseFloat(impostaStr.replace(',', '.')) : 0;
+    let imponibile = imponibileStr ? parseFloat(imponibileStr.replace(',', '.')) : 0;
+    let imposta = impostaStr ? parseFloat(impostaStr.replace(',', '.')) : 0;
 
-    if (!isNaN(imponibile) && imponibile > 0) {
+    if (!isNaN(imponibile) && imponibile !== 0) {
+      if (isNotaCredito) {
+        imponibile = -Math.abs(imponibile);
+        imposta = -Math.abs(imposta);
+      }
       sumImponibiliRiepilogo += imponibile;
       riepilogoIVA.push({
         aliquotaIVA,
@@ -505,16 +519,24 @@ export function parseFatturaEmessaXML(xmlString: string, fileName = 'fattura_eme
 
   // REGOLA IMPONIBILE FATTURE EMESSE:
   // Deve importare solo l'imponibile. Se ci sono due o più aliquote IVA, importa la somma di tutti gli imponibili.
+  // In caso di Nota di Credito (TD04/TD08), l'importo deve essere negativo a storno dei ricavi.
   let finalImponibileTotale = 0;
-  if (sumImponibiliRiepilogo > 0) {
+  if (sumImponibiliRiepilogo !== 0) {
     finalImponibileTotale = Math.round(sumImponibiliRiepilogo * 100) / 100;
-  } else if (calculatedImponibileSum > 0) {
+  } else if (calculatedImponibileSum !== 0) {
     finalImponibileTotale = Math.round(calculatedImponibileSum * 100) / 100;
-  } else if (importoTotale > 0) {
-    finalImponibileTotale = importoTotale;
+  } else if (importoTotale !== 0) {
+    finalImponibileTotale = isNotaCredito ? -Math.abs(importoTotale) : importoTotale;
   }
 
-  if (importoTotale === 0 && finalImponibileTotale > 0) {
+  if (isNotaCredito) {
+    finalImponibileTotale = -Math.abs(finalImponibileTotale);
+    if (importoTotale > 0) {
+      importoTotale = -Math.abs(importoTotale);
+    }
+  }
+
+  if (importoTotale === 0 && finalImponibileTotale !== 0) {
     importoTotale = finalImponibileTotale;
   }
 
@@ -578,6 +600,7 @@ export function parseFatturaEmessaXML(xmlString: string, fileName = 'fattura_eme
       data,
       importoTotale: Math.round(importoTotale * 100) / 100,
       imponibileTotale: finalImponibileTotale,
+      isNotaCredito,
       causale: causaleText || undefined,
       riepilogoIVA: riepilogoIVA.length > 0 ? riepilogoIVA : undefined,
     },
