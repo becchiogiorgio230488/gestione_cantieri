@@ -1,0 +1,6 @@
+{
+  "name": "Gestione Schede Cantiere 2026 - Z Cantieri & Fatture XML",
+  "description": "Applicazione contabile avanzata per artigiani: gestione schede cantiere, importazione fatture elettroniche XML B2B, ripartizione DDT e righe con Gemini AI ed esportazione Excel Z-Cantieri 2026.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
