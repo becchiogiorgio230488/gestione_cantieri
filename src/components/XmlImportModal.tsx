@@ -38,6 +38,7 @@ import {
   formatSingleDdtTag,
   buildFormattedTypeAndSubject,
 } from '../utils/invoiceDuplicateHelper';
+import { CantiereSearchSelect } from './CantiereSearchSelect';
 
 interface XmlImportModalProps {
   cantieri: Cantiere[];
@@ -1503,37 +1504,31 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                   )}
 
                   <div className="flex items-center gap-2">
-                    <select
-                      value={wholeInvoiceCantiereId}
-                      onChange={(e) => {
-                        if (e.target.value === '__create_new__') {
-                          openQuickCreate({ mode: 'whole' });
-                          return;
-                        }
-                        setWholeInvoiceCantiereId(e.target.value);
-                      }}
-                      className="flex-1 bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
-                    >
-                      <option value="__create_new__" className="text-emerald-400 font-bold bg-slate-900">
-                        ➕ + CREA NUOVO CANTIERE...
-                      </option>
-                      <option value="__sospeso__" className="text-amber-400 font-bold">
-                        ⚠️ Invia a SCHEDA SOSPESI (Da chiarire con il cliente)
-                      </option>
-                      <option value="__ignore__" className="text-rose-400 font-bold">
-                        ⛔ DA NON CONSIDERARE (Spese bancarie / Attrezzatura aziendale / Spese generali)
-                      </option>
-                      {sortedCantieri.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {formatCantiereSelectOption(c)}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex-1 min-w-0">
+                      <CantiereSearchSelect
+                        value={wholeInvoiceCantiereId}
+                        onChange={(val) => {
+                          if (val === '__create_new__') {
+                            openQuickCreate({ mode: 'whole' });
+                            return;
+                          }
+                          setWholeInvoiceCantiereId(val);
+                        }}
+                        cantieri={cantieri}
+                        onCreateNew={() => openQuickCreate({ mode: 'whole' })}
+                        showSospesiOption={true}
+                        showIgnoreOption={true}
+                        sospesiLabel="⚠️ Invia a SCHEDA SOSPESI (Da chiarire con il cliente)"
+                        ignoreLabel="⛔ DA NON CONSIDERARE (Spese bancarie / Spese generali)"
+                        placeholder="Cerca cantiere per nome o città..."
+                        size="md"
+                      />
+                    </div>
 
                     <button
                       type="button"
                       onClick={() => openQuickCreate({ mode: 'whole' })}
-                      className="px-3 py-2.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+                      className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
                       title="Crea direttamente un nuovo cantiere da questo elenco"
                     >
                       <Plus className="h-4 w-4" />
@@ -1879,48 +1874,36 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
                           {/* Target Cantiere Select & Ignore Toggle */}
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1 border-t border-slate-800/80">
-                            <div className="flex items-center gap-2 flex-1">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
                               <label className="text-xs font-semibold text-slate-300 shrink-0">
                                 Assegna a Cantiere:
                               </label>
-                              <select
-                                value={alloc.targetCantiereId}
-                                onChange={(e) => {
-                                  if (e.target.value === '__create_new__') {
-                                    openQuickCreate({ mode: 'ddt', key: ddt.numeroDDT });
-                                    return;
-                                  }
-                                  setDdtAllocations((prev) => ({
-                                    ...prev,
-                                    [ddt.numeroDDT]: {
-                                      ...prev[ddt.numeroDDT],
-                                      targetCantiereId: e.target.value,
-                                    },
-                                  }));
-                                }}
-                                className={`flex-1 bg-slate-900 border rounded-lg p-2 text-xs focus:outline-none ${
-                                  alloc.targetCantiereId === '__ignore__'
-                                    ? 'border-rose-500/50 text-rose-300'
-                                    : alloc.targetCantiereId === '__sospeso__'
-                                    ? 'border-amber-500/50 text-amber-300'
-                                    : 'border-slate-700 text-white focus:border-amber-400'
-                                }`}
-                              >
-                                <option value="__create_new__" className="text-emerald-400 font-bold bg-slate-900">
-                                  ➕ + CREA NUOVO CANTIERE...
-                                </option>
-                                <option value="__sospeso__" className="text-amber-400 font-bold">
-                                  ⚠️ Invia a SCHEDA SOSPESI (DDT da chiarire col cliente)
-                                </option>
-                                <option value="__ignore__" className="text-rose-400 font-bold">
-                                  ⛔ DA NON CONSIDERARE (Escludi l'intero DDT)
-                                </option>
-                                {sortedCantieri.map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {formatCantiereSelectOption(c)}
-                                  </option>
-                                ))}
-                              </select>
+                              <div className="flex-1 min-w-0">
+                                <CantiereSearchSelect
+                                  value={alloc.targetCantiereId}
+                                  onChange={(val) => {
+                                    if (val === '__create_new__') {
+                                      openQuickCreate({ mode: 'ddt', key: ddt.numeroDDT });
+                                      return;
+                                    }
+                                    setDdtAllocations((prev) => ({
+                                      ...prev,
+                                      [ddt.numeroDDT]: {
+                                        ...prev[ddt.numeroDDT],
+                                        targetCantiereId: val,
+                                      },
+                                    }));
+                                  }}
+                                  cantieri={cantieri}
+                                  onCreateNew={() => openQuickCreate({ mode: 'ddt', key: ddt.numeroDDT })}
+                                  showSospesiOption={true}
+                                  showIgnoreOption={true}
+                                  sospesiLabel="⚠️ Invia a SCHEDA SOSPESI (DDT da chiarire col cliente)"
+                                  ignoreLabel="⛔ DA NON CONSIDERARE (Escludi l'intero DDT)"
+                                  placeholder="Cerca cantiere per nome o città..."
+                                  size="sm"
+                                />
+                              </div>
 
                               <button
                                 type="button"
@@ -2159,10 +2142,10 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                           {!alloc.isSplit ? (
                             <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1 border-t border-slate-800/80">
                               <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                                <select
+                                <CantiereSearchSelect
                                   value={alloc.targetCantiereId}
-                                  onChange={(e) => {
-                                    if (e.target.value === '__create_new__') {
+                                  onChange={(val) => {
+                                    if (val === '__create_new__') {
                                       openQuickCreate({ mode: 'line', key: riga.numeroLinea });
                                       return;
                                     }
@@ -2170,33 +2153,20 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                       ...prev,
                                       [riga.numeroLinea]: {
                                         ...prev[riga.numeroLinea],
-                                        targetCantiereId: e.target.value,
+                                        targetCantiereId: val,
                                       },
                                     }));
                                   }}
-                                  className={`flex-1 bg-slate-900 border rounded p-1.5 text-xs focus:outline-none ${
-                                    alloc.targetCantiereId === '__ignore__'
-                                      ? 'border-rose-500/50 text-rose-300'
-                                      : alloc.targetCantiereId === '__sospeso__'
-                                      ? 'border-amber-500/50 text-amber-300'
-                                      : 'border-slate-700 text-white focus:border-amber-400'
-                                  }`}
-                                >
-                                  <option value="__create_new__" className="text-emerald-400 font-bold bg-slate-900">
-                                    ➕ + CREA NUOVO CANTIERE...
-                                  </option>
-                                  <option value="__sospeso__" className="text-amber-400 font-bold">
-                                    ⚠️ Invia a SCHEDA SOSPESI (Da attribuire)
-                                  </option>
-                                  <option value="__ignore__" className="text-rose-400 font-bold">
-                                    ⛔ DA NON CONSIDERARE (Spese bancarie / Spese generali)
-                                  </option>
-                                  {sortedCantieri.map((c) => (
-                                    <option key={c.id} value={c.id}>
-                                      {formatCantiereSelectOption(c)}
-                                    </option>
-                                  ))}
-                                </select>
+                                  cantieri={cantieri}
+                                  onCreateNew={() => openQuickCreate({ mode: 'line', key: riga.numeroLinea })}
+                                  showSospesiOption={true}
+                                  showIgnoreOption={true}
+                                  sospesiLabel="⚠️ Invia a SCHEDA SOSPESI (Da attribuire)"
+                                  ignoreLabel="⛔ DA NON CONSIDERARE (Spese bancarie / Spese generali)"
+                                  placeholder="Cerca cantiere per nome o città..."
+                                  size="sm"
+                                  className="flex-1 min-w-0"
+                                />
 
                                 <button
                                   type="button"
@@ -2269,38 +2239,33 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
                               {alloc.splits.map((sp, sIdx) => (
                                 <div key={sIdx} className="flex items-center gap-2 text-xs">
-                                  <select
-                                    value={sp.cantiereId}
-                                    onChange={(e) => {
-                                      if (e.target.value === '__create_new__') {
-                                        openQuickCreate({ mode: 'line_split', key: riga.numeroLinea, splitIndex: sIdx });
-                                        return;
-                                      }
-                                      handleUpdateLineSplit(
-                                        riga.numeroLinea,
-                                        sIdx,
-                                        e.target.value,
-                                        sp.percentage,
-                                        riga.prezzoTotale
-                                      );
-                                    }}
-                                    className="flex-1 bg-slate-950 border border-slate-700 rounded p-1 text-xs text-white"
-                                  >
-                                    <option value="__create_new__" className="text-emerald-400 font-bold bg-slate-900">
-                                      ➕ + CREA NUOVO CANTIERE...
-                                    </option>
-                                    <option value="__sospeso__" className="text-amber-400 font-bold">
-                                      ⚠️ Scheda Sospesi
-                                    </option>
-                                    <option value="__ignore__" className="text-rose-400 font-bold">
-                                      ⛔ DA NON CONSIDERARE
-                                    </option>
-                                    {sortedCantieri.map((c) => (
-                                      <option key={c.id} value={c.id}>
-                                        {formatCantiereSelectOption(c)}
-                                      </option>
-                                    ))}
-                                  </select>
+                                  <div className="flex-1 min-w-0">
+                                    <CantiereSearchSelect
+                                      value={sp.cantiereId}
+                                      onChange={(val) => {
+                                        if (val === '__create_new__') {
+                                          openQuickCreate({ mode: 'line_split', key: riga.numeroLinea, splitIndex: sIdx });
+                                          return;
+                                        }
+                                        handleUpdateLineSplit(
+                                          riga.numeroLinea,
+                                          sIdx,
+                                          val,
+                                          sp.percentage,
+                                          riga.prezzoTotale
+                                        );
+                                      }}
+                                      cantieri={cantieri}
+                                      onCreateNew={() => openQuickCreate({ mode: 'line_split', key: riga.numeroLinea, splitIndex: sIdx })}
+                                      showSospesiOption={true}
+                                      showIgnoreOption={true}
+                                      sospesiLabel="⚠️ Scheda Sospesi"
+                                      ignoreLabel="⛔ DA NON CONSIDERARE"
+                                      placeholder="Cerca cantiere per nome o città..."
+                                      size="sm"
+                                      className="flex-1 min-w-0"
+                                    />
+                                  </div>
 
                                   <div className="flex items-center gap-1 w-24">
                                     <input

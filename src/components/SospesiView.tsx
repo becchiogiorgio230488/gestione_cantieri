@@ -26,6 +26,7 @@ import { Cantiere, SospesoItem, Movement } from '../types';
 import { formatCurrency, formatDateItalian, getTodayISODate } from '../utils/calculations';
 import { exportSospesiExcel } from '../utils/excelExport';
 import { ConfirmModal } from './ConfirmModal';
+import { formatCantiereLabel } from './CantiereSearchSelect';
 
 interface SospesiViewProps {
   sospesi: SospesoItem[];
@@ -81,9 +82,21 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editNote, setEditNote] = useState('');
 
-  // Editing internal note (only visible on screen)
   const [editingInternalNoteId, setEditingInternalNoteId] = useState<string | null>(null);
   const [editInternalNote, setEditInternalNote] = useState('');
+
+  // Cantieri in ordine di CITTA - VIA (CLIENTE)
+  const sortedCantieri = React.useMemo(() => {
+    return [...cantieri].sort((a, b) => {
+      const cityA = (a.city || '').trim().toLowerCase();
+      const cityB = (b.city || '').trim().toLowerCase();
+      const cityCmp = cityA.localeCompare(cityB, 'it');
+      if (cityCmp !== 0) return cityCmp;
+      const addrA = (a.address || '').trim().toLowerCase();
+      const addrB = (b.address || '').trim().toLowerCase();
+      return addrA.localeCompare(addrB, 'it');
+    });
+  }, [cantieri]);
 
   const totSospesi = sospesi.reduce((acc, s) => acc + (Number(s.amount) || 0), 0);
 
@@ -530,13 +543,13 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
               {cantieri.length > 0 && (
                 <div className="flex items-center gap-1.5">
                   <select
-                    value={bulkTargetCantiereId || cantieri[0]?.id}
+                    value={bulkTargetCantiereId || sortedCantieri[0]?.id}
                     onChange={(e) => setBulkTargetCantiereId(e.target.value)}
                     className="bg-slate-950 border border-slate-700 text-white text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-amber-400 max-w-xs"
                   >
-                    {cantieri.map((c) => (
+                    {sortedCantieri.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.name} ({c.client})
+                        {formatCantiereLabel(c)}
                       </option>
                     ))}
                   </select>
@@ -811,11 +824,11 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                                 [s.id]: e.target.value,
                               });
                             }}
-                            className="flex-1 bg-slate-950 border border-slate-700 text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:border-amber-400 max-w-[180px]"
+                            className="flex-1 bg-slate-950 border border-slate-700 text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:border-amber-400 max-w-[220px]"
                           >
-                            {cantieri.map((c) => (
+                            {sortedCantieri.map((c) => (
                               <option key={c.id} value={c.id}>
-                                {c.name} ({c.client})
+                                {formatCantiereLabel(c)}
                               </option>
                             ))}
                           </select>
