@@ -28,6 +28,7 @@ import { calculateCantiereTotals, formatCurrency, formatDateItalian, getTodayISO
 import { exportSingleCantiereExcel } from '../utils/excelExport';
 import { ConfirmModal } from './ConfirmModal';
 import { findLinkedInvoiceMovementsAcrossCantieri } from '../utils/invoiceDuplicateHelper';
+import { CantiereSearchSelect } from './CantiereSearchSelect';
 
 interface SchedaCantiereViewProps {
   cantiere: Cantiere;
@@ -1356,23 +1357,22 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
 
                   {allCantieri.filter((c) => c.id !== cantiere.id).length > 0 ? (
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
-                      <select
-                        value={targetMoveCantiereId}
-                        onChange={(e) => setTargetMoveCantiereId(e.target.value)}
-                        className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-lg p-2 text-xs focus:outline-none focus:border-blue-400"
-                      >
-                        {allCantieri
-                          .filter((c) => c.id !== cantiere.id)
-                          .map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name} {c.client ? `(${c.client} - ${c.city})` : `(${c.city})`}
-                            </option>
-                          ))}
-                      </select>
+                      <div className="flex-1 min-w-0">
+                        <CantiereSearchSelect
+                          value={targetMoveCantiereId}
+                          onChange={setTargetMoveCantiereId}
+                          cantieri={allCantieri.filter((c) => c.id !== cantiere.id)}
+                          showSospesiOption={false}
+                          showIgnoreOption={false}
+                          placeholder="Cerca cantiere per nome o città..."
+                          size="sm"
+                        />
+                      </div>
                       <button
                         type="button"
                         onClick={handleConfirmMoveToOtherCantiere}
-                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-sm shrink-0 inline-flex items-center justify-center gap-1.5"
+                        disabled={!targetMoveCantiereId}
+                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-sm shrink-0 inline-flex items-center justify-center gap-1.5"
                       >
                         <ArrowRightLeft className="h-3.5 w-3.5" />
                         <span>Sposta nel Cantiere</span>

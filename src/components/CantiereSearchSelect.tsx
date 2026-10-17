@@ -9,13 +9,16 @@ export interface CantiereSearchSelectProps {
   onCreateNew?: () => void;
   showSospesiOption?: boolean;
   showIgnoreOption?: boolean;
+  showUnassignedOption?: boolean;
   sospesiLabel?: string;
   ignoreLabel?: string;
+  unassignedLabel?: string;
   placeholder?: string;
   className?: string;
   size?: 'sm' | 'md';
   disabled?: boolean;
   autoOpenSearch?: boolean;
+  hasError?: boolean;
 }
 
 /**
@@ -53,15 +56,19 @@ export const CantiereSearchSelect: React.FC<CantiereSearchSelectProps> = ({
   onCreateNew,
   showSospesiOption = true,
   showIgnoreOption = true,
+  showUnassignedOption = true,
   sospesiLabel = '⚠️ Invia a SCHEDA SOSPESI (Da chiarire con il cliente)',
   ignoreLabel = '⛔ DA NON CONSIDERARE (Spese bancarie / Spese generali)',
+  unassignedLabel = '⚠️ DA SELEZIONARE (Nessun cantiere)',
   placeholder = 'Cerca cantiere per nome o città...',
   className = '',
   size = 'md',
   disabled = false,
+  hasError = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -84,9 +91,10 @@ export const CantiereSearchSelect: React.FC<CantiereSearchSelectProps> = ({
   useEffect(() => {
     if (isOpen) {
       setSearchQuery('');
+      setHighlightedIndex(0);
       setTimeout(() => {
         inputRef.current?.focus();
-      }, 50);
+      }, 30);
     }
   }, [isOpen]);
 
@@ -103,13 +111,13 @@ export const CantiereSearchSelect: React.FC<CantiereSearchSelectProps> = ({
     });
   }, [cantieri]);
 
-function normalizeText(text: string): string {
-  return text
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim();
-}
+  function normalizeText(text: string): string {
+    return text
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+  }
 
   // Filter cantieri by searchQuery across: NAME, CITY, ADDRESS, CLIENT
   const filteredCantieri = useMemo(() => {
@@ -171,10 +179,19 @@ function normalizeText(text: string): string {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       setIsOpen(false);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((prev) =>
+        prev < filteredCantieri.length - 1 ? prev + 1 : prev
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      // If exactly 1 cantiere matches search, select it
-      if (filteredCantieri.length === 1) {
+      if (highlightedIndex >= 0 && highlightedIndex < filteredCantieri.length) {
+        handleSelect(filteredCantieri[highlightedIndex].id);
+      } else if (filteredCantieri.length === 1) {
         handleSelect(filteredCantieri[0].id);
       }
     }
@@ -185,55 +202,86 @@ function normalizeText(text: string): string {
   return (
     <div className={`relative ${isOpen ? 'z-40' : 'z-0'} ${className}`} ref={containerRef}>
       {/* Trigger Button */}
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-full text-left rounded-lg border transition-all cursor-pointer flex items-center justify-between gap-2 shadow-sm ${
-          disabled
-            ? 'opacity-50 cursor-not-allowed bg-slate-900 border-slate-800'
-            : isOpen
-            ? 'border-amber-400 ring-2 ring-amber-400/20 bg-slate-900'
-            : value === '__ignore__'
-            ? 'border-rose-500/50 bg-rose-950/20 text-rose-300 hover:border-rose-400'
-            : value === '__sospeso__'
-            ? 'border-amber-500/50 bg-amber-950/20 text-amber-300 hover:border-amber-400'
-            : value
-            ? 'border-slate-700 bg-slate-900 text-white hover:border-slate-600'
-            : 'border-slate-700 bg-slate-950 text-slate-400 hover:border-slate-600'
-        } ${isSmall ? 'py-1.5 px-2.5 text-xs' : 'py-2 px-3 text-sm'}`}
-        title="Clicca per cercare e scegliere il cantiere per nome o città"
-      >
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <Search className={`shrink-0 ${isSmall ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${isOpen ? 'text-amber-400' : 'text-slate-400'}`} />
-          {selectedDisplay ? (
-            <div className="truncate flex-1 font-medium">
-              {selectedDisplay.isSpecial ? (
-                <span className={selectedDisplay.type === 'ignore' ? 'text-rose-300 font-bold' : 'text-amber-300 font-bold'}>
-                  {selectedDisplay.text}
+      <div className="relative flex items-center">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setIsOpen(!isOpen)}
+          className={`w-full text-left rounded-lg border transition-all cursor-pointer flex items-center justify-between gap-2 shadow-sm ${
+            disabled
+              ? 'opacity-50 cursor-not-allowed bg-slate-900 border-slate-800'
+              : hasError && !value
+              ? 'border-rose-500 ring-2 ring-rose-500/50 bg-rose-950/40 text-rose-200 hover:border-rose-400 animate-pulse'
+              : isOpen
+              ? 'border-amber-400 ring-2 ring-amber-400/20 bg-slate-900'
+              : value === '__ignore__'
+              ? 'border-rose-500/50 bg-rose-950/20 text-rose-300 hover:border-rose-400'
+              : value === '__sospeso__'
+              ? 'border-amber-500/50 bg-amber-950/20 text-amber-300 hover:border-amber-400'
+              : value
+              ? 'border-slate-700 bg-slate-900 text-white hover:border-slate-600'
+              : 'border-amber-500/70 bg-amber-500/10 text-amber-300 hover:border-amber-400 hover:bg-amber-500/15 shadow-inner'
+          } ${isSmall ? 'py-1.5 px-2.5 text-xs' : 'py-2 px-3 text-sm'}`}
+          title="Clicca per cercare e scegliere il cantiere per nome o città"
+        >
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <Search className={`shrink-0 ${isSmall ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${hasError && !value ? 'text-rose-400' : isOpen ? 'text-amber-400' : value ? 'text-slate-400' : 'text-amber-400'}`} />
+            {selectedDisplay ? (
+              <div className="truncate flex-1 font-medium">
+                {selectedDisplay.isSpecial ? (
+                  <span className={selectedDisplay.type === 'ignore' ? 'text-rose-300 font-bold' : 'text-amber-300 font-bold'}>
+                    {selectedDisplay.text}
+                  </span>
+                ) : (
+                  <span className="text-white font-semibold flex items-center gap-1.5 truncate">
+                    {selectedDisplay.city && (
+                      <span className="px-1.5 py-0.2 rounded bg-slate-800 text-amber-300 text-[10px] font-black uppercase tracking-wider shrink-0 border border-slate-700">
+                        {selectedDisplay.city}
+                      </span>
+                    )}
+                    <span className="truncate">{selectedDisplay.text}</span>
+                  </span>
+                )}
+              </div>
+            ) : (
+              <span className={`font-bold flex items-center gap-1.5 truncate text-xs ${hasError ? 'text-rose-300' : 'text-amber-300'}`}>
+                <span className={`px-1.5 py-0.2 rounded border text-[10px] uppercase font-black tracking-wider shrink-0 ${
+                  hasError
+                    ? 'bg-rose-500/30 border-rose-500 text-rose-200'
+                    : 'bg-amber-500/20 border-amber-500/40 text-amber-200'
+                }`}>
+                  {hasError ? '🚨 OBBLIGATORIO: DA SELEZIONARE' : '⚠️ DA SELEZIONARE'}
                 </span>
-              ) : (
-                <span className="text-white font-semibold flex items-center gap-1.5 truncate">
-                  {selectedDisplay.city && (
-                    <span className="px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 text-[10px] font-bold uppercase tracking-wider shrink-0 border border-slate-700">
-                      {selectedDisplay.city}
-                    </span>
-                  )}
-                  <span className="truncate">{selectedDisplay.text}</span>
+                <span className="truncate text-amber-300/80 font-normal hidden sm:inline">
+                  {placeholder}
                 </span>
-              )}
-            </div>
-          ) : (
-            <span className="text-slate-400 truncate text-xs">{placeholder}</span>
-          )}
-        </div>
+              </span>
+            )}
+          </div>
 
-        <ChevronDown
-          className={`shrink-0 text-slate-400 transition-transform duration-200 ${
-            isSmall ? 'h-3.5 w-3.5' : 'h-4 w-4'
-          } ${isOpen ? 'rotate-180 text-amber-400' : ''}`}
-        />
-      </button>
+          <div className="flex items-center gap-1 shrink-0">
+            {value && !disabled && (
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onChange('');
+                }}
+                className="p-0.5 text-slate-400 hover:text-rose-300 hover:bg-slate-800 rounded transition-colors"
+                title="Deseleziona / Riporta a 'DA SELEZIONARE'"
+              >
+                <X className="h-3 w-3" />
+              </span>
+            )}
+            <ChevronDown
+              className={`shrink-0 text-slate-400 transition-transform duration-200 ${
+                isSmall ? 'h-3.5 w-3.5' : 'h-4 w-4'
+              } ${isOpen ? 'rotate-180 text-amber-400' : ''}`}
+            />
+          </div>
+        </button>
+      </div>
 
       {/* Dropdown Popover */}
       {isOpen && (
@@ -341,6 +389,26 @@ function normalizeText(text: string): string {
                   <span className="truncate">{ignoreLabel}</span>
                 </div>
                 {value === '__ignore__' && <Check className="h-3.5 w-3.5 text-rose-400 shrink-0" />}
+              </button>
+            )}
+
+            {showUnassignedOption && (
+              <button
+                type="button"
+                onClick={() => handleSelect('')}
+                className={`w-full px-3 py-1.5 text-left text-xs flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                  !value
+                    ? 'bg-amber-500/20 text-amber-200 font-bold'
+                    : 'text-amber-400/80 hover:bg-amber-500/10 hover:text-amber-300'
+                }`}
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <span className="text-[10px] px-1 py-0.2 rounded bg-amber-500/30 border border-amber-500/50 font-bold text-amber-200">
+                    NON ASSEGNATO
+                  </span>
+                  <span className="truncate">{unassignedLabel}</span>
+                </div>
+                {!value && <Check className="h-3.5 w-3.5 text-amber-400 shrink-0" />}
               </button>
             )}
           </div>

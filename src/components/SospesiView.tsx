@@ -26,7 +26,7 @@ import { Cantiere, SospesoItem, Movement } from '../types';
 import { formatCurrency, formatDateItalian, getTodayISODate } from '../utils/calculations';
 import { exportSospesiExcel } from '../utils/excelExport';
 import { ConfirmModal } from './ConfirmModal';
-import { formatCantiereLabel } from './CantiereSearchSelect';
+import { CantiereSearchSelect, formatCantiereLabel } from './CantiereSearchSelect';
 
 interface SospesiViewProps {
   sospesi: SospesoItem[];
@@ -542,21 +542,22 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               {cantieri.length > 0 && (
                 <div className="flex items-center gap-1.5">
-                  <select
-                    value={bulkTargetCantiereId || sortedCantieri[0]?.id}
-                    onChange={(e) => setBulkTargetCantiereId(e.target.value)}
-                    className="bg-slate-950 border border-slate-700 text-white text-xs rounded px-2.5 py-1.5 focus:outline-none focus:border-amber-400 max-w-xs"
-                  >
-                    {sortedCantieri.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {formatCantiereLabel(c)}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="w-64 min-w-[220px]">
+                    <CantiereSearchSelect
+                      value={bulkTargetCantiereId}
+                      onChange={setBulkTargetCantiereId}
+                      cantieri={cantieri}
+                      showSospesiOption={false}
+                      showIgnoreOption={false}
+                      placeholder="Cerca cantiere per nome o città..."
+                      size="sm"
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={handleAssignBulk}
-                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                    disabled={!bulkTargetCantiereId}
+                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
                     title="Sposta tutte le voci selezionate nel cantiere scelto"
                   >
                     <ArrowRight className="h-3.5 w-3.5" />
@@ -816,22 +817,22 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                       {/* 1-Click Move to Cantiere */}
                       <td className="py-3 px-3">
                         <div className="flex items-center gap-1.5">
-                          <select
-                            value={currentTarget}
-                            onChange={(e) => {
-                              setSelectedTargetByItem({
-                                ...selectedTargetByItem,
-                                [s.id]: e.target.value,
-                              });
-                            }}
-                            className="flex-1 bg-slate-950 border border-slate-700 text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:border-amber-400 max-w-[220px]"
-                          >
-                            {sortedCantieri.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {formatCantiereLabel(c)}
-                              </option>
-                            ))}
-                          </select>
+                          <div className="w-56 min-w-[200px]">
+                            <CantiereSearchSelect
+                              value={currentTarget}
+                              onChange={(val) => {
+                                setSelectedTargetByItem((prev) => ({
+                                  ...prev,
+                                  [s.id]: val,
+                                }));
+                              }}
+                              cantieri={cantieri}
+                              showSospesiOption={false}
+                              showIgnoreOption={false}
+                              placeholder="Cerca per nome o città..."
+                              size="sm"
+                            />
+                          </div>
 
                           <button
                             type="button"

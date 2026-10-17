@@ -98,9 +98,9 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
   // Allocation Mode
   const [allocationMode, setAllocationMode] = useState<AllocationMode>('by_line');
-  const [wholeInvoiceCantiereId, setWholeInvoiceCantiereId] = useState<string>(
-    preselectedCantiereId || (cantieri[0]?.id ?? '')
-  );
+  // Leave empty / DA SELEZIONARE by default so the user must explicitly choose or confirm
+  const [wholeInvoiceCantiereId, setWholeInvoiceCantiereId] = useState<string>('');
+  const [showValidationErrors, setShowValidationErrors] = useState<boolean>(false);
 
   // Allocations mapping
   const [lineAllocations, setLineAllocations] = useState<Record<number, LineAllocation>>({});
@@ -336,29 +336,28 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         /^(NC|NDC|N\.C\.)/i.test(parsed.datiDocumento.numero);
       setIsNotaDiCredito(isNC);
 
-      // Initialize default allocation for each line
-      const defaultCantiere = preselectedCantiereId || (cantieri[0]?.id ?? '');
+      // Initialize default allocation for each line: leave EMPTY / DA SELEZIONARE as requested
       const initLines: Record<number, LineAllocation> = {};
       parsed.righe.forEach((r) => {
         initLines[r.numeroLinea] = {
-          targetCantiereId: defaultCantiere,
+          targetCantiereId: '',
           isSplit: false,
           splits: [
-            { cantiereId: defaultCantiere, percentage: 100, amount: r.prezzoTotale },
+            { cantiereId: '', percentage: 100, amount: r.prezzoTotale },
           ],
         };
       });
       setLineAllocations(initLines);
 
-      // Initialize default allocation and customizable names for each DDT
+      // Initialize default allocation and customizable names for each DDT: leave EMPTY / DA SELEZIONARE
       const initDdts: Record<string, DdtAllocation> = {};
       const initDdtNames: Record<string, string> = {};
       parsed.ddtList.forEach((d) => {
         initDdts[d.numeroDDT] = {
-          targetCantiereId: defaultCantiere,
+          targetCantiereId: '',
           isSplit: false,
           splits: [
-            { cantiereId: defaultCantiere, percentage: 100, amount: d.totaleDDT || 0 },
+            { cantiereId: '', percentage: 100, amount: d.totaleDDT || 0 },
           ],
         };
         initDdtNames[d.numeroDDT] = d.numeroDDT.toUpperCase().startsWith('DDT')
@@ -368,6 +367,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
       setDdtAllocations(initDdts);
       setCustomDdtNames(initDdtNames);
       setExcludedLines({});
+      setWholeInvoiceCantiereId('');
+      setShowValidationErrors(false);
       setExpandedDdts(parsed.ddtList.length > 0 ? { [parsed.ddtList[0].numeroDDT]: true } : {});
 
       if (parsed.ddtList.length > 0) {
@@ -516,14 +517,12 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
       const current = prev[lineNum];
       const nextIsSplit = !current.isSplit;
       if (nextIsSplit) {
-        const c1 = cantieri[0]?.id ?? '';
-        const c2 = cantieri[1]?.id ?? c1;
         return {
           ...current,
           isSplit: true,
           splits: [
-            { cantiereId: c1, percentage: 50, amount: Math.round(totalAmount * 0.5 * 100) / 100 },
-            { cantiereId: c2, percentage: 50, amount: Math.round(totalAmount * 0.5 * 100) / 100 },
+            { cantiereId: current.targetCantiereId || '', percentage: 50, amount: Math.round(totalAmount * 0.5 * 100) / 100 },
+            { cantiereId: '', percentage: 50, amount: Math.round(totalAmount * 0.5 * 100) / 100 },
           ],
         };
       } else {
@@ -586,22 +585,47 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
     });
   };
 
-  // Live calculation of totals: Cantieri vs Sospesi vs Esclusi (Non Considerare)
+  // Live calculation of totals: Cantieri vs Sospesi vs Esclusi (Non Considerare) vs Da Selezionare
   const computedStats = React.useMemo(() => {
-    if (!parsedInvoice) return { cantieri: 0, sospesi: 0, ignored: 0, total: 0, imponibileTotal: 0, isNotaDiCredito: false };
+    if (!parsedInvoice) {
+      return {
+        cantieri: 0,
+        sospesi: 0,
+        cantieriPlusSospesi: 0,
+        ignored: 0,
+        unassigned: 0,
+        unassignedCount: 0,
+        total: 0,
+        imponibileTotal: 0,
+        isNotaDiCredito: false,
+      };
+    }
     let cantieriSum = 0;
     let sospesiSum = 0;
     let ignoredSum = 0;
+    let unassignedSum = 0;
+    let unassignedCount = 0;
 
     if (allocationMode === 'whole') {
       const tot = invoiceImponibile;
-      if (wholeInvoiceCantiereId === '__ignore__') ignoredSum += tot;
-      else if (wholeInvoiceCantiereId === '__sospeso__') sospesiSum += tot;
-      else cantieriSum += tot;
+      if (wholeInvoiceCantiereId === '__ignore__') {
+        ignoredSum += tot;
+      } else if (wholeInvoiceCantiereId === '__sospeso__') {
+        sospesiSum += tot;
+      } else if (wholeInvoiceCantiereId && wholeInvoiceCantiereId.trim()) {
+        cantieriSum += tot;
+      } else {
+        unassignedSum += tot;
+        unassignedCount += 1;
+      }
     } else if (allocationMode === 'by_ddt' && parsedInvoice.ddtList.length > 0) {
       parsedInvoice.ddtList.forEach((ddt) => {
         const alloc = ddtAllocations[ddt.numeroDDT];
-        if (!alloc) return;
+        if (!alloc) {
+          unassignedSum += Math.abs(ddt.totaleDDT || 0);
+          unassignedCount++;
+          return;
+        }
 
         const connectedLines = parsedInvoice.righe.filter((r) =>
           ddt.riferimentoLinee.includes(r.numeroLinea)
@@ -617,29 +641,44 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
           ? Math.round(excludedLinesInDdt.reduce((sum, r) => sum + Math.abs(r.prezzoTotale), 0) * 100) / 100
           : 0;
 
+        ignoredSum += ddtExcludedAmount;
+
         if (alloc.targetCantiereId === '__ignore__') {
-          ignoredSum += Math.abs(ddt.totaleDDT || 0);
+          ignoredSum += ddtActiveTotal;
         } else if (alloc.targetCantiereId === '__sospeso__') {
           sospesiSum += ddtActiveTotal;
-          ignoredSum += ddtExcludedAmount;
         } else if (alloc.isSplit && alloc.splits.length > 0) {
           alloc.splits.forEach((sp) => {
             const splitActiveAmount = Math.round(((ddtActiveTotal * sp.percentage) / 100) * 100) / 100;
-            if (sp.cantiereId === '__ignore__') ignoredSum += splitActiveAmount;
-            else if (sp.cantiereId === '__sospeso__') sospesiSum += splitActiveAmount;
-            else cantieriSum += splitActiveAmount;
+            if (sp.cantiereId === '__ignore__') {
+              ignoredSum += splitActiveAmount;
+            } else if (sp.cantiereId === '__sospeso__') {
+              sospesiSum += splitActiveAmount;
+            } else if (sp.cantiereId && sp.cantiereId.trim()) {
+              cantieriSum += splitActiveAmount;
+            } else {
+              unassignedSum += splitActiveAmount;
+              unassignedCount++;
+            }
           });
-          ignoredSum += ddtExcludedAmount;
-        } else {
+        } else if (alloc.targetCantiereId && alloc.targetCantiereId.trim()) {
           cantieriSum += ddtActiveTotal;
-          ignoredSum += ddtExcludedAmount;
+        } else {
+          if (ddtActiveTotal > 0) {
+            unassignedSum += ddtActiveTotal;
+            unassignedCount++;
+          }
         }
       });
     } else {
       parsedInvoice.righe.forEach((line) => {
         const alloc = lineAllocations[line.numeroLinea];
         const lineTot = Math.abs(line.prezzoTotale);
-        if (!alloc) return;
+        if (!alloc) {
+          unassignedSum += lineTot;
+          unassignedCount++;
+          return;
+        }
         if (alloc.targetCantiereId === '__ignore__') {
           ignoredSum += lineTot;
         } else if (alloc.targetCantiereId === '__sospeso__') {
@@ -647,21 +686,38 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         } else if (alloc.isSplit && alloc.splits.length > 0) {
           alloc.splits.forEach((sp) => {
             const spAmount = Math.abs(sp.amount);
-            if (sp.cantiereId === '__ignore__') ignoredSum += spAmount;
-            else if (sp.cantiereId === '__sospeso__') sospesiSum += spAmount;
-            else cantieriSum += spAmount;
+            if (sp.cantiereId === '__ignore__') {
+              ignoredSum += spAmount;
+            } else if (sp.cantiereId === '__sospeso__') {
+              sospesiSum += spAmount;
+            } else if (sp.cantiereId && sp.cantiereId.trim()) {
+              cantieriSum += spAmount;
+            } else {
+              unassignedSum += spAmount;
+              unassignedCount++;
+            }
           });
-        } else {
+        } else if (alloc.targetCantiereId && alloc.targetCantiereId.trim()) {
           cantieriSum += lineTot;
+        } else {
+          unassignedSum += lineTot;
+          unassignedCount++;
         }
       });
     }
 
     const sign = isNotaDiCredito ? -1 : 1;
+    const roundedCantieri = Math.round(cantieriSum * sign * 100) / 100;
+    const roundedSospesi = Math.round(sospesiSum * sign * 100) / 100;
+    const roundedCantieriPlusSospesi = Math.round((roundedCantieri + roundedSospesi) * 100) / 100;
+
     return {
-      cantieri: Math.round(cantieriSum * sign * 100) / 100,
-      sospesi: Math.round(sospesiSum * sign * 100) / 100,
+      cantieri: roundedCantieri,
+      sospesi: roundedSospesi,
+      cantieriPlusSospesi: roundedCantieriPlusSospesi,
       ignored: Math.round(ignoredSum * 100) / 100,
+      unassigned: Math.round(unassignedSum * sign * 100) / 100,
+      unassignedCount,
       total: Math.round(Math.abs(parsedInvoice.datiDocumento.importoTotale) * sign * 100) / 100,
       imponibileTotal: Math.round(invoiceImponibile * sign * 100) / 100,
       isNotaDiCredito,
@@ -671,6 +727,82 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
   // Commit all allocations into movements and/or sospesi
   const handleConfirmAndCommit = (bypassDuplicateCheck = false) => {
     if (!parsedInvoice) return;
+
+    // VALIDAZIONE OBBLIGATORIA DELLE DESTINAZIONI IN TUTTE LE MODALITÀ:
+    // Nessuna casella deve rimanere vuota / "DA SELEZIONARE".
+    // Tutte le caselle devono essere valorizzate con un cantiere, con la Scheda Sospesi (__sospeso__), o con Da Non Considerare (__ignore__).
+    if (allocationMode === 'whole') {
+      if (!wholeInvoiceCantiereId || !wholeInvoiceCantiereId.trim()) {
+        setShowValidationErrors(true);
+        setErrorMessage(
+          'Attenzione: la casella del cantiere di destinazione non è valorizzata! Seleziona obbligatoriamente un Cantiere, la Scheda Sospesi, oppure "Da Non Considerare" prima di confermare.'
+        );
+        return;
+      }
+    } else if (allocationMode === 'by_ddt' && parsedInvoice.ddtList.length > 0) {
+      const unassignedDdtList: string[] = [];
+      parsedInvoice.ddtList.forEach((ddt) => {
+        const alloc = ddtAllocations[ddt.numeroDDT];
+        const connectedLines = parsedInvoice.righe.filter((r) =>
+          ddt.riferimentoLinee.includes(r.numeroLinea)
+        );
+        const activeLines = connectedLines.filter((r) => !excludedLines[r.numeroLinea]);
+        // Se tutte le righe sono state escluse manualmente, il DDT è già a posto (escluso)
+        if (connectedLines.length > 0 && activeLines.length === 0) return;
+        if (!alloc) {
+          unassignedDdtList.push(getDdtDisplayName(ddt.numeroDDT));
+          return;
+        }
+        if (alloc.targetCantiereId === '__ignore__') return;
+        if (alloc.isSplit) {
+          const hasEmpty = alloc.splits.some((sp) => !sp.cantiereId || !sp.cantiereId.trim());
+          if (hasEmpty) {
+            unassignedDdtList.push(`${getDdtDisplayName(ddt.numeroDDT)} (quote non assegnate)`);
+          }
+        } else if (!alloc.targetCantiereId || !alloc.targetCantiereId.trim()) {
+          unassignedDdtList.push(getDdtDisplayName(ddt.numeroDDT));
+        }
+      });
+
+      if (unassignedDdtList.length > 0) {
+        setShowValidationErrors(true);
+        setErrorMessage(
+          `Attenzione: ci sono ${unassignedDdtList.length} DDT con casella di destinazione non valorizzata! Seleziona per ciascuno un Cantiere, i Sospesi, oppure 'Da Non Considerare'. DDT da completare: ${unassignedDdtList.join(', ')}`
+        );
+        return;
+      }
+    } else {
+      // Modalità by_line
+      const unassignedLinesList: string[] = [];
+      parsedInvoice.righe.forEach((line) => {
+        const alloc = lineAllocations[line.numeroLinea];
+        if (!alloc) {
+          unassignedLinesList.push(`Riga ${line.numeroLinea}`);
+          return;
+        }
+        if (alloc.targetCantiereId === '__ignore__') return;
+        if (alloc.isSplit) {
+          const hasEmpty = alloc.splits.some((sp) => !sp.cantiereId || !sp.cantiereId.trim());
+          if (hasEmpty) {
+            unassignedLinesList.push(`Riga ${line.numeroLinea} (quote non assegnate)`);
+          }
+        } else if (!alloc.targetCantiereId || !alloc.targetCantiereId.trim()) {
+          unassignedLinesList.push(`Riga ${line.numeroLinea} ("${line.descrizione.slice(0, 24)}...")`);
+        }
+      });
+
+      if (unassignedLinesList.length > 0) {
+        setShowValidationErrors(true);
+        setErrorMessage(
+          `Attenzione: ci sono ${unassignedLinesList.length} righe con casella di destinazione non valorizzata! Seleziona per ciascuna un Cantiere, i Sospesi, oppure 'Da Non Considerare'. Righe da completare: ${unassignedLinesList.slice(0, 6).join(', ')}${unassignedLinesList.length > 6 ? ` e altre ${unassignedLinesList.length - 6}...` : ''}`
+        );
+        return;
+      }
+    }
+
+    // Se tutti i controlli sono superati, resetta gli errori
+    setShowValidationErrors(false);
+    setErrorMessage(null);
 
     const commitList: { cantiereId: string; movement: Movement }[] = [];
     const sospesiCommitList: Omit<SospesoItem, 'id' | 'createdAt'>[] = [];
@@ -697,10 +829,6 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
     }
 
     if (allocationMode === 'whole') {
-      if (!wholeInvoiceCantiereId) {
-        setErrorMessage('Seleziona il cantiere di destinazione o Scheda Sospesi.');
-        return;
-      }
       if (wholeInvoiceCantiereId === '__ignore__') {
         // Excluded whole invoice
         onClose();
@@ -1346,6 +1474,27 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                 </div>
               )}
 
+              {/* Validation Error Banner */}
+              {errorMessage && (
+                <div className="p-3.5 bg-rose-500/15 border-2 border-rose-500/60 rounded-xl text-rose-200 text-xs flex items-start gap-2.5 shadow-lg animate-fadeIn">
+                  <AlertTriangle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 space-y-1">
+                    <div className="font-bold text-white flex items-center justify-between">
+                      <span className="text-sm">⚠️ Destinazioni non completate</span>
+                      <button
+                        type="button"
+                        onClick={() => setErrorMessage(null)}
+                        className="text-rose-400 hover:text-white p-0.5 rounded cursor-pointer"
+                        title="Chiudi avviso"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <p className="text-xs text-rose-200 leading-relaxed font-medium">{errorMessage}</p>
+                  </div>
+                </div>
+              )}
+
               {/* Quick Filters Toolbar */}
               <div className="p-3 rounded-xl bg-slate-950/90 border border-slate-800 flex flex-wrap items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2">
@@ -1390,12 +1539,39 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                       });
                       setDdtAllocations(sDdts);
                       setWholeInvoiceCantiereId('__sospeso__');
+                      setErrorMessage(null);
                       setAiSuccessMessage('Tutti gli elementi impostati per la SCHEDA SOSPESI.');
                     }}
                     className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1 cursor-pointer"
                   >
                     <Clock className="h-3.5 w-3.5" />
                     <span>Tutti a Sospesi</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!parsedInvoice) return;
+                      const sLines: Record<number, LineAllocation> = {};
+                      parsedInvoice.righe.forEach((r) => {
+                        sLines[r.numeroLinea] = { targetCantiereId: '', isSplit: false, splits: [{ cantiereId: '', percentage: 100, amount: r.prezzoTotale }] };
+                      });
+                      setLineAllocations(sLines);
+                      const sDdts: Record<string, DdtAllocation> = {};
+                      parsedInvoice.ddtList.forEach((d) => {
+                        sDdts[d.numeroDDT] = { targetCantiereId: '', isSplit: false, splits: [{ cantiereId: '', percentage: 100, amount: d.totaleDDT || 0 }] };
+                      });
+                      setDdtAllocations(sDdts);
+                      setWholeInvoiceCantiereId('');
+                      setShowValidationErrors(false);
+                      setErrorMessage(null);
+                      setAiSuccessMessage('Tutte le caselle reimpostate su "DA SELEZIONARE".');
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-all flex items-center gap-1 cursor-pointer"
+                    title="Resetta tutte le caselle su Da Selezionare"
+                  >
+                    <Undo2 className="h-3.5 w-3.5 text-amber-400" />
+                    <span>Reimposta su "Da Selezionare"</span>
                   </button>
                 </div>
               </div>
@@ -1507,12 +1683,14 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                     <div className="flex-1 min-w-0">
                       <CantiereSearchSelect
                         value={wholeInvoiceCantiereId}
+                        hasError={showValidationErrors && !wholeInvoiceCantiereId}
                         onChange={(val) => {
                           if (val === '__create_new__') {
                             openQuickCreate({ mode: 'whole' });
                             return;
                           }
                           setWholeInvoiceCantiereId(val);
+                          if (val) setErrorMessage(null);
                         }}
                         cantieri={cantieri}
                         onCreateNew={() => openQuickCreate({ mode: 'whole' })}
@@ -1881,6 +2059,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                               <div className="flex-1 min-w-0">
                                 <CantiereSearchSelect
                                   value={alloc.targetCantiereId}
+                                  hasError={showValidationErrors && !alloc.targetCantiereId}
                                   onChange={(val) => {
                                     if (val === '__create_new__') {
                                       openQuickCreate({ mode: 'ddt', key: ddt.numeroDDT });
@@ -1893,6 +2072,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                         targetCantiereId: val,
                                       },
                                     }));
+                                    if (val) setErrorMessage(null);
                                   }}
                                   cantieri={cantieri}
                                   onCreateNew={() => openQuickCreate({ mode: 'ddt', key: ddt.numeroDDT })}
@@ -1925,7 +2105,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                   [ddt.numeroDDT]: {
                                     ...prev[ddt.numeroDDT],
                                     targetCantiereId: isCurrentlyIgnored
-                                      ? (cantieri[0]?.id || '')
+                                      ? ''
                                       : '__ignore__',
                                   },
                                 }));
@@ -2144,6 +2324,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                               <div className="flex items-center gap-1.5 flex-1 min-w-0">
                                 <CantiereSearchSelect
                                   value={alloc.targetCantiereId}
+                                  hasError={showValidationErrors && !alloc.targetCantiereId}
                                   onChange={(val) => {
                                     if (val === '__create_new__') {
                                       openQuickCreate({ mode: 'line', key: riga.numeroLinea });
@@ -2156,6 +2337,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                         targetCantiereId: val,
                                       },
                                     }));
+                                    if (val) setErrorMessage(null);
                                   }}
                                   cantieri={cantieri}
                                   onCreateNew={() => openQuickCreate({ mode: 'line', key: riga.numeroLinea })}
@@ -2189,7 +2371,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                       [riga.numeroLinea]: {
                                         ...prev[riga.numeroLinea],
                                         targetCantiereId: isCurrentlyIgnored
-                                          ? (cantieri[0]?.id || '')
+                                          ? ''
                                           : '__ignore__',
                                         isSplit: false,
                                       },
@@ -2242,6 +2424,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                   <div className="flex-1 min-w-0">
                                     <CantiereSearchSelect
                                       value={sp.cantiereId}
+                                      hasError={showValidationErrors && !sp.cantiereId}
                                       onChange={(val) => {
                                         if (val === '__create_new__') {
                                           openQuickCreate({ mode: 'line_split', key: riga.numeroLinea, splitIndex: sIdx });
@@ -2254,6 +2437,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                           sp.percentage,
                                           riga.prezzoTotale
                                         );
+                                        if (val) setErrorMessage(null);
                                       }}
                                       cantieri={cantieri}
                                       onCreateNew={() => openQuickCreate({ mode: 'line_split', key: riga.numeroLinea, splitIndex: sIdx })}
@@ -2308,85 +2492,183 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         {/* Modal Footer with Imponibile Accounting Breakdown */}
         <div className="p-4 border-t border-slate-800 bg-slate-950 flex flex-col gap-3">
           {parsedInvoice && (
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-slate-900/90 p-3 rounded-xl border border-slate-800">
-              {/* Primary Accounting Comparison Box */}
-              <div className="flex flex-wrap items-center gap-3 text-xs">
-                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
+            <div className="flex flex-col gap-3 bg-slate-900/90 p-3.5 rounded-xl border border-slate-800">
+              {/* Primary Accounting Comparison Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-xs">
+                {/* 1. Imponibile Cantieri */}
+                <div className={`p-2.5 rounded-lg border flex items-start gap-2.5 ${
                   isNotaDiCredito
-                    ? 'bg-rose-950/60 border-rose-500/50'
-                    : 'bg-emerald-950/60 border-emerald-500/40'
+                    ? 'bg-rose-950/40 border-rose-500/40'
+                    : 'bg-emerald-950/40 border-emerald-500/40'
                 }`}>
-                  <Building className={`h-4 w-4 shrink-0 ${isNotaDiCredito ? 'text-rose-400' : 'text-emerald-400'}`} />
-                  <div>
+                  <Building className={`h-4 w-4 mt-0.5 shrink-0 ${isNotaDiCredito ? 'text-rose-400' : 'text-emerald-400'}`} />
+                  <div className="min-w-0 flex-1">
                     <span className={`text-[10px] uppercase font-bold block tracking-wider ${
                       isNotaDiCredito ? 'text-rose-400' : 'text-emerald-400'
                     }`}>
-                      Totale Imponibile Destinato:
+                      1. Imponibile Cantieri:
                     </span>
-                    <span className={`text-base font-black font-mono ${
+                    <span className={`text-base font-black font-mono block ${
                       isNotaDiCredito ? 'text-rose-300' : 'text-emerald-300'
                     }`}>
                       {formatCurrency(computedStats.cantieri)}
                     </span>
+                    <span className="text-[10px] text-slate-400 block truncate">
+                      Destinato alle schede cantiere
+                    </span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 bg-slate-950 border border-slate-700 px-3 py-2 rounded-lg">
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
-                      Totale Imponibile {isNotaDiCredito ? 'Nota di Credito' : 'Fattura'} (Contabilità):
+                {/* 2. Imponibile Sospesi */}
+                <div className="p-2.5 rounded-lg border bg-amber-950/40 border-amber-500/40 flex items-start gap-2.5">
+                  <Clock className="h-4 w-4 mt-0.5 text-amber-400 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[10px] uppercase font-bold text-amber-400 block tracking-wider">
+                      2. Imponibile a Sospesi:
                     </span>
-                    <span className={`text-base font-black font-mono ${isNotaDiCredito ? 'text-rose-300' : 'text-white'}`}>
+                    <span className="text-base font-black font-mono text-amber-300 block">
+                      {formatCurrency(computedStats.sospesi)}
+                    </span>
+                    <span className="text-[10px] text-slate-400 block truncate">
+                      Inviato a Scheda Sospesi
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. TOTALE DESTINATO + SOSPESI (Richiesto: è questo che deve quadrare con la contabilità) */}
+                <div className="p-2.5 rounded-lg border-2 border-indigo-400/90 bg-indigo-950/70 ring-2 ring-indigo-500/20 shadow-md flex items-start gap-2.5 relative overflow-hidden">
+                  <Layers className="h-4 w-4 mt-0.5 text-indigo-300 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[10px] uppercase font-black text-indigo-300 tracking-wider">
+                        TOT. DESTINATO + SOSPESI:
+                      </span>
+                      <span className="px-1 py-0.2 rounded bg-indigo-500/30 text-indigo-200 text-[9px] font-bold border border-indigo-400/40 uppercase">
+                        (1 + 2)
+                      </span>
+                    </div>
+                    <span className="text-base font-black font-mono text-white block">
+                      {formatCurrency(computedStats.cantieriPlusSospesi)}
+                    </span>
+                    <span className="text-[10px] text-indigo-300 font-semibold block truncate">
+                      Totale registrato a sistema
+                    </span>
+                  </div>
+                </div>
+
+                {/* 4. Imponibile Fattura / Contabilità */}
+                <div className="p-2.5 rounded-lg border bg-slate-950 border-slate-700 flex items-start gap-2.5">
+                  <FileText className="h-4 w-4 mt-0.5 text-slate-400 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-[10px] uppercase font-bold text-slate-300 tracking-wider truncate">
+                        Imponibile Fattura:
+                      </span>
+                      {isNotaDiCredito ? (
+                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 uppercase">
+                          NC (-)
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 border border-slate-700 uppercase">
+                          Contabilità
+                        </span>
+                      )}
+                    </div>
+                    <span className={`text-base font-black font-mono block ${isNotaDiCredito ? 'text-rose-300' : 'text-white'}`}>
                       {formatCurrency(computedStats.imponibileTotal)}
                     </span>
+                    <span className="text-[10px] text-slate-400 block truncate">
+                      {parsedInvoice.datiDocumento.riepilogoIVA && parsedInvoice.datiDocumento.riepilogoIVA.length > 1
+                        ? `${parsedInvoice.datiDocumento.riepilogoIVA.length} aliquote IVA considerate`
+                        : 'Totale imponibile da quadrare'}
+                    </span>
                   </div>
-                  {isNotaDiCredito && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 uppercase">
-                      Nota di Credito (-)
-                    </span>
-                  )}
-                  {parsedInvoice.datiDocumento.riepilogoIVA && parsedInvoice.datiDocumento.riepilogoIVA.length > 1 && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
-                      {parsedInvoice.datiDocumento.riepilogoIVA.length} aliquote IVA
-                    </span>
-                  )}
-                </div>
-
-                {/* Match / Difference status badge */}
-                <div className="flex items-center">
-                  {Math.abs(computedStats.cantieri - computedStats.imponibileTotal) < 0.01 ? (
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300 bg-emerald-500/10 px-3 py-2 rounded-lg border border-emerald-500/30">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
-                      <span>Coincide con l'imponibile contabile (100%)</span>
-                    </div>
-                  ) : (
-                    <div className="text-[11px] bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-lg space-y-0.5">
-                      <div className="flex items-center gap-1.5 font-bold text-amber-300">
-                        <Info className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                        <span>
-                          {Math.abs(computedStats.cantieri) < Math.abs(computedStats.imponibileTotal)
-                            ? `Mancano ${formatCurrency(Math.abs(computedStats.imponibileTotal) - Math.abs(computedStats.cantieri))} all'imponibile contabile`
-                            : `Supera di ${formatCurrency(Math.abs(computedStats.cantieri) - Math.abs(computedStats.imponibileTotal))} l'imponibile contabile`}
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-slate-400">
-                        Sospesi: <strong className="text-amber-300 font-mono">{formatCurrency(computedStats.sospesi)}</strong> • Non Considerare: <strong className="text-rose-300 font-mono">{formatCurrency(computedStats.ignored)}</strong>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
 
-              {/* Secondary details and Total doc */}
-              <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400 shrink-0">
-                <span className="hidden xl:inline">Tot. Doc (con IVA): <strong className={isNotaDiCredito ? 'text-rose-300' : 'text-slate-300'}>{formatCurrency(computedStats.total)}</strong></span>
+              {/* Status Bar: Quadratura con la contabilità (Destinato + Sospesi vs Imponibile Contabile) */}
+              {(() => {
+                const diffWithAccounting = Math.round((Math.abs(computedStats.imponibileTotal) - Math.abs(computedStats.cantieriPlusSospesi)) * 100) / 100;
+                const isExactMatch = Math.abs(diffWithAccounting) < 0.01;
+                // Considera anche le voci "Non considerare" se l'utente le ha escluse volontariamente
+                const diffWithIgnored = Math.round((diffWithAccounting - computedStats.ignored) * 100) / 100;
+                const isMatchWithIgnored = Math.abs(diffWithIgnored) < 0.01 && computedStats.ignored > 0;
+
+                return (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {isExactMatch ? (
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300 bg-emerald-500/15 px-3 py-1.5 rounded-lg border border-emerald-500/40 shadow-sm">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                          <span>✓ QUADRATURA CONTABILE PERFETTA (100%): Totale Destinato + Sospesi ({formatCurrency(computedStats.cantieriPlusSospesi)}) coincide con l'imponibile contabile</span>
+                        </div>
+                      ) : isMatchWithIgnored ? (
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300 bg-emerald-500/15 px-3 py-1.5 rounded-lg border border-emerald-500/40">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                          <span>✓ Quadratura OK (Destinato + Sospesi + {formatCurrency(computedStats.ignored)} Non Considerati = Imponibile Fattura)</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300 bg-amber-500/15 px-3 py-1.5 rounded-lg border border-amber-500/40">
+                          <Info className="h-4 w-4 text-amber-400 shrink-0" />
+                          <span>
+                            {diffWithAccounting > 0
+                              ? `Differenza da quadrare: mancano ${formatCurrency(diffWithAccounting)} all'imponibile contabile (Destinato + Sospesi: ${formatCurrency(computedStats.cantieriPlusSospesi)})`
+                              : `Differenza: il Totale Destinato + Sospesi supera di ${formatCurrency(Math.abs(diffWithAccounting))} l'imponibile contabile`}
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="text-[11px] text-slate-400 flex items-center gap-2 flex-wrap pl-1">
+                        <span>Non Considerare: <strong className="text-rose-300 font-mono">{formatCurrency(computedStats.ignored)}</strong></span>
+                        {computedStats.unassignedCount > 0 ? (
+                          <>
+                            <span>•</span>
+                            <span className="text-amber-300 font-bold bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/40 flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3 text-amber-400" />
+                              <span>Da Selezionare: <strong className="font-mono text-white">{formatCurrency(computedStats.unassigned)}</strong> ({computedStats.unassignedCount} {computedStats.unassignedCount === 1 ? 'voce' : 'voci'})</span>
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span>•</span>
+                            <span className="text-emerald-400 font-semibold flex items-center gap-1 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
+                              <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                              <span>Tutte le voci valorizzate</span>
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400 shrink-0 self-end sm:self-auto">
+                      <span>Tot. Doc (con IVA): <strong className={isNotaDiCredito ? 'text-rose-300' : 'text-slate-300'}>{formatCurrency(computedStats.total)}</strong></span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* Inline alert in footer if user clicked confirm with unassigned boxes */}
+          {showValidationErrors && computedStats.unassignedCount > 0 && (
+            <div className="p-2.5 bg-rose-500/20 border border-rose-500/50 rounded-lg text-rose-200 text-xs flex items-center justify-between gap-2 animate-shake">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
+                <span className="font-semibold">
+                  Impossibile confermare: ci sono ancora <strong>{computedStats.unassignedCount} caselle</strong> da valorizzare con un Cantiere, i Sospesi o 'Da Non Considerare'!
+                </span>
               </div>
+              <span className="text-[11px] font-bold text-rose-300 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-500/40 shrink-0">
+                {computedStats.unassignedCount} mancanti
+              </span>
             </div>
           )}
 
           <div className="flex items-center justify-between gap-3 pt-1">
             <span className="text-[11px] text-slate-500 italic hidden sm:inline">
-              Verifica che il totale imponibile destinato coincida con il totale imponibile registrato in contabilità.
+              {computedStats.unassignedCount > 0
+                ? '⚠️ Seleziona una destinazione per tutte le voci prima di confermare la registrazione.'
+                : 'Verifica che il totale imponibile destinato coincida con il totale imponibile registrato in contabilità.'}
             </span>
 
             <div className="flex items-center gap-2 justify-end shrink-0 ml-auto">
@@ -2400,10 +2682,27 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
               {parsedInvoice && (
                 <button
                   onClick={() => handleConfirmAndCommit(false)}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+                  className={`px-5 py-2 text-white text-xs font-bold rounded-lg transition-all shadow-md cursor-pointer flex items-center gap-1.5 ${
+                    computedStats.unassignedCount > 0
+                      ? 'bg-amber-600 hover:bg-amber-500 ring-1 ring-amber-400/50'
+                      : 'bg-emerald-600 hover:bg-emerald-500'
+                  }`}
+                  title={
+                    computedStats.unassignedCount > 0
+                      ? `Attenzione: ci sono ${computedStats.unassignedCount} caselle ancora da selezionare`
+                      : 'Tutte le caselle sono valorizzate. Clicca per confermare e registrare nei cantieri'
+                  }
                 >
-                  <Check className="h-4 w-4" />
-                  <span>Conferma e Registra Movimenti nei Cantieri</span>
+                  {computedStats.unassignedCount > 0 ? (
+                    <AlertTriangle className="h-4 w-4 text-amber-200" />
+                  ) : (
+                    <Check className="h-4 w-4" />
+                  )}
+                  <span>
+                    {computedStats.unassignedCount > 0
+                      ? `Conferma (${computedStats.unassignedCount} da selezionare)`
+                      : 'Conferma e Registra Movimenti nei Cantieri'}
+                  </span>
                 </button>
               )}
             </div>
