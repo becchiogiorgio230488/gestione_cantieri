@@ -683,8 +683,15 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                       </td>
 
                       {/* IMPORTO (€) */}
-                      <td className="py-3 px-3 text-right font-mono font-bold text-rose-300 whitespace-nowrap text-xs">
-                        {formatCurrency(s.amount)}
+                      <td className="py-3 px-3 text-right font-mono font-bold whitespace-nowrap text-xs">
+                        <span className={s.amount < 0 ? 'text-purple-300' : 'text-rose-300'}>
+                          {s.amount < 0 && (
+                            <span className="text-[10px] px-1 py-0.5 mr-1 rounded bg-purple-500/20 text-purple-300 font-sans font-bold border border-purple-500/30">
+                              N.C.
+                            </span>
+                          )}
+                          {formatCurrency(s.amount)}
+                        </span>
                       </td>
 
                       {/* NOTA INTERNA (SOLO A VIDEO - Non stampata né esportata in Excel) */}

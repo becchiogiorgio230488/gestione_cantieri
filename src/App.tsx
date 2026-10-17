@@ -33,6 +33,7 @@ import {
   isSameSupplier,
   formatSingleDdtTag,
   extractDdtEntriesFromTypeAndSubject,
+  extractDdtEntriesFromMovement,
   buildFormattedTypeAndSubject,
   mergeTypeAndSubject,
 } from './utils/invoiceDuplicateHelper';
@@ -673,21 +674,23 @@ export default function App() {
       const targetC = art.cantieri?.find((c) => c.id === targetCantiereId);
       if (!sourceC || !targetC) return art;
 
-      const normDoc = cleanInvoiceNum(movement.docNumber);
+      const normDoc = extractInvoiceNumberFromMovement(movement) || cleanInvoiceNum(movement.docNumber);
       const movAmount = Math.round((movement.purchases || movement.issued || 0) * 100) / 100;
       const supplier = extractSupplierFromMovement(movement) || art.name;
 
       // Extract existing DDT tags from moving movement
-      const incomingDdtTags = extractDdtEntriesFromTypeAndSubject(movement.typeAndSubject, movement.date);
+      const incomingDdtTags = extractDdtEntriesFromMovement(movement);
 
       // Check if this invoice is ALREADY present in target cantiere
       const existingMovIndex = targetC.movements.findIndex(
         (m) =>
-          (m.purchases || 0) > 0 &&
+          ((m.purchases || 0) !== 0 || m.source === 'xml') &&
           (
+            (extractInvoiceNumberFromMovement(m) && extractInvoiceNumberFromMovement(m) === normDoc) ||
             cleanInvoiceNum(m.docNumber) === normDoc ||
             (m.xmlRef?.invoiceNum && cleanInvoiceNum(m.xmlRef.invoiceNum) === normDoc)
-          )
+          ) &&
+          isSameSupplier(extractSupplierFromMovement(m), supplier)
       );
 
       let nextTargetMovements: Movement[];
@@ -797,7 +800,7 @@ export default function App() {
       // Check if this invoice is ALREADY present in target cantiere
       const existingMovIndex = targetC.movements.findIndex(
         (m) =>
-          (m.purchases || 0) > 0 &&
+          ((m.purchases || 0) !== 0 || m.source === 'xml') &&
           (
             cleanInvoiceNum(m.docNumber) === normDoc ||
             (m.xmlRef?.invoiceNum && cleanInvoiceNum(m.xmlRef.invoiceNum) === normDoc)
@@ -927,7 +930,7 @@ export default function App() {
 
         const existingMovIndex = workingMovements.findIndex(
           (m) =>
-            (m.purchases || 0) > 0 &&
+            ((m.purchases || 0) !== 0 || m.source === 'xml') &&
             (
               cleanInvoiceNum(m.docNumber) === normDoc ||
               (m.xmlRef?.invoiceNum && cleanInvoiceNum(m.xmlRef.invoiceNum) === normDoc)

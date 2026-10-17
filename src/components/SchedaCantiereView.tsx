@@ -267,12 +267,13 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
     const mov = movementActionData.movement;
     if (onMoveToOtherCantiere) {
       onMoveToOtherCantiere(cantiere.id, targetMoveCantiereId, mov);
+    } else {
+      onUpdateCantiere({
+        ...cantiere,
+        movements: cantiere.movements.filter((m) => m.id !== mov.id),
+        updatedAt: new Date().toISOString(),
+      });
     }
-    onUpdateCantiere({
-      ...cantiere,
-      movements: cantiere.movements.filter((m) => m.id !== mov.id),
-      updatedAt: new Date().toISOString(),
-    });
     setMovementActionData(null);
   };
 
@@ -1066,8 +1067,17 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                       <td className="py-3 px-3 font-mono text-slate-400 text-xs">{m.protocol || '-'}</td>
 
                       {/* ACQUISTI */}
-                      <td className="py-3 px-4 text-right font-mono font-medium text-rose-300">
-                        {m.purchases !== 0 ? formatCurrency(m.purchases) : '-'}
+                      <td className={`py-3 px-4 text-right font-mono font-medium ${m.purchases < 0 ? 'text-purple-300 font-bold' : 'text-rose-300'}`}>
+                        {m.purchases !== 0 ? (
+                          <div className="flex items-center justify-end gap-1.5">
+                            {m.purchases < 0 && (
+                              <span className="text-[10px] px-1 py-0.5 rounded bg-purple-500/20 text-purple-300 font-sans font-bold border border-purple-500/30">
+                                N.C.
+                              </span>
+                            )}
+                            <span>{formatCurrency(m.purchases)}</span>
+                          </div>
+                        ) : '-'}
                       </td>
 
                       {/* EMESSE */}

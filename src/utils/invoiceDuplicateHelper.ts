@@ -116,8 +116,8 @@ export function findExistingPurchaseInvoiceLocations(
   // 1. Search in cantieri movements
   for (const c of cantieri) {
     for (const mov of c.movements || []) {
-      // Must be a purchase / cost movement or XML source
-      if (mov.purchases <= 0 && mov.source !== 'xml') continue;
+      // Must be a purchase / cost movement or XML source (including credit notes where purchases < 0)
+      if (mov.purchases === 0 && mov.source !== 'xml') continue;
 
       const movInv = extractInvoiceNumberFromMovement(mov);
       const movSupp = extractSupplierFromMovement(mov);
@@ -259,7 +259,7 @@ export function findLinkedInvoiceMovementsAcrossCantieri(
           });
         }
       } else {
-        if (mov.purchases <= 0 && mov.source !== 'xml') continue;
+        if (mov.purchases === 0 && mov.source !== 'xml') continue;
         const movInv = extractInvoiceNumberFromMovement(mov);
         const movSupp = extractSupplierFromMovement(mov);
 
@@ -363,6 +363,23 @@ export function extractDdtEntriesFromTypeAndSubject(typeAndSubject?: string, def
   }
 
   return Array.from(new Set(entries));
+}
+
+/**
+ * Extracts all DDT entries from a Movement, looking in typeAndSubject, notes, and protocol.
+ */
+export function extractDdtEntriesFromMovement(movement: Movement): string[] {
+  const fromType = extractDdtEntriesFromTypeAndSubject(movement.typeAndSubject, movement.date);
+  const fromNotes = extractDdtEntriesFromTypeAndSubject(movement.notes, movement.date);
+  const fromProtocol = movement.protocol && movement.protocol.toUpperCase().includes('DDT')
+    ? [formatSingleDdtTag(movement.protocol, movement.date)]
+    : [];
+
+  const combined = new Set<string>();
+  for (const d of fromType) if (d) combined.add(d);
+  for (const d of fromNotes) if (d) combined.add(d);
+  for (const d of fromProtocol) if (d) combined.add(d);
+  return Array.from(combined);
 }
 
 /**

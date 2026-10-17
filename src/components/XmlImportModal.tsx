@@ -25,6 +25,8 @@ import {
   Pencil,
   Tag,
   FileText,
+  MinusCircle,
+  Undo2,
 } from 'lucide-react';
 import { Cantiere, ParsedInvoiceXML, Movement, SospesoItem } from '../types';
 import { parseFatturaElettronicaXML } from '../utils/xmlParser';
@@ -117,6 +119,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
   const [customProtocol, setCustomProtocol] = useState<string>('');
   // User-customizable DDT Names (so each DDT can be renamed before being reported into the cantiere)
   const [customDdtNames, setCustomDdtNames] = useState<Record<string, string>>({});
+  // Flag indicating whether this document is a Nota di Credito (Credit Note) with negative amounts
+  const [isNotaDiCredito, setIsNotaDiCredito] = useState<boolean>(false);
 
   // Helper to resolve custom DDT name or nice default
   const getDdtDisplayName = (numeroDDT: string) => {
@@ -141,12 +145,12 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
   // Total Imponibile (considera solo l'imponibile e se ci sono più aliquote IVA somma tutti gli imponibili)
   const invoiceImponibile = React.useMemo(() => {
     if (!parsedInvoice) return 0;
-    if (parsedInvoice.datiDocumento.totaleImponibile && parsedInvoice.datiDocumento.totaleImponibile > 0) {
-      return parsedInvoice.datiDocumento.totaleImponibile;
+    if (parsedInvoice.datiDocumento.totaleImponibile && parsedInvoice.datiDocumento.totaleImponibile !== 0) {
+      return Math.abs(parsedInvoice.datiDocumento.totaleImponibile);
     }
-    const linesSum = (parsedInvoice.righe || []).reduce((s, r) => s + (r.prezzoTotale || 0), 0);
+    const linesSum = (parsedInvoice.righe || []).reduce((s, r) => s + Math.abs(r.prezzoTotale || 0), 0);
     if (linesSum > 0) return Math.round(linesSum * 100) / 100;
-    return parsedInvoice.datiDocumento.importoTotale || 0;
+    return Math.abs(parsedInvoice.datiDocumento.importoTotale || 0);
   }, [parsedInvoice]);
 
   // Proponi i cantieri in ordine di CITTA - VIA
@@ -322,6 +326,14 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
       // Initialize editable invoice number with what came from XML
       setCustomInvoiceNumber(parsed.datiDocumento.numero);
       setCustomProtocol('');
+
+      // Auto-detect if document is a Nota di Credito (TD04, TD08 or NC text)
+      const isNC =
+        parsed.datiDocumento.tipoDocumento === 'TD04' ||
+        parsed.datiDocumento.tipoDocumento === 'TD08' ||
+        /nota\s+di\s+credito/i.test(parsed.datiDocumento.causale?.join(' ') || '') ||
+        /^(NC|NDC|N\.C\.)/i.test(parsed.datiDocumento.numero);
+      setIsNotaDiCredito(isNC);
 
       // Initialize default allocation for each line
       const defaultCantiere = preselectedCantiereId || (cantieri[0]?.id ?? '');
@@ -575,7 +587,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
   // Live calculation of totals: Cantieri vs Sospesi vs Esclusi (Non Considerare)
   const computedStats = React.useMemo(() => {
-    if (!parsedInvoice) return { cantieri: 0, sospesi: 0, ignored: 0, total: 0 };
+    if (!parsedInvoice) return { cantieri: 0, sospesi: 0, ignored: 0, total: 0, imponibileTotal: 0, isNotaDiCredito: false };
     let cantieriSum = 0;
     let sospesiSum = 0;
     let ignoredSum = 0;
@@ -597,15 +609,15 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         const excludedLinesInDdt = connectedLines.filter((r) => excludedLines[r.numeroLinea]);
 
         const ddtActiveTotal = connectedLines.length > 0
-          ? Math.round(activeLines.reduce((sum, r) => sum + r.prezzoTotale, 0) * 100) / 100
-          : (ddt.totaleDDT || 0);
+          ? Math.round(activeLines.reduce((sum, r) => sum + Math.abs(r.prezzoTotale), 0) * 100) / 100
+          : Math.abs(ddt.totaleDDT || 0);
 
         const ddtExcludedAmount = connectedLines.length > 0
-          ? Math.round(excludedLinesInDdt.reduce((sum, r) => sum + r.prezzoTotale, 0) * 100) / 100
+          ? Math.round(excludedLinesInDdt.reduce((sum, r) => sum + Math.abs(r.prezzoTotale), 0) * 100) / 100
           : 0;
 
         if (alloc.targetCantiereId === '__ignore__') {
-          ignoredSum += (ddt.totaleDDT || 0);
+          ignoredSum += Math.abs(ddt.totaleDDT || 0);
         } else if (alloc.targetCantiereId === '__sospeso__') {
           sospesiSum += ddtActiveTotal;
           ignoredSum += ddtExcludedAmount;
@@ -625,7 +637,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
     } else {
       parsedInvoice.righe.forEach((line) => {
         const alloc = lineAllocations[line.numeroLinea];
-        const lineTot = line.prezzoTotale;
+        const lineTot = Math.abs(line.prezzoTotale);
         if (!alloc) return;
         if (alloc.targetCantiereId === '__ignore__') {
           ignoredSum += lineTot;
@@ -633,9 +645,10 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
           sospesiSum += lineTot;
         } else if (alloc.isSplit && alloc.splits.length > 0) {
           alloc.splits.forEach((sp) => {
-            if (sp.cantiereId === '__ignore__') ignoredSum += sp.amount;
-            else if (sp.cantiereId === '__sospeso__') sospesiSum += sp.amount;
-            else cantieriSum += sp.amount;
+            const spAmount = Math.abs(sp.amount);
+            if (sp.cantiereId === '__ignore__') ignoredSum += spAmount;
+            else if (sp.cantiereId === '__sospeso__') sospesiSum += spAmount;
+            else cantieriSum += spAmount;
           });
         } else {
           cantieriSum += lineTot;
@@ -643,14 +656,16 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
       });
     }
 
+    const sign = isNotaDiCredito ? -1 : 1;
     return {
-      cantieri: Math.round(cantieriSum * 100) / 100,
-      sospesi: Math.round(sospesiSum * 100) / 100,
+      cantieri: Math.round(cantieriSum * sign * 100) / 100,
+      sospesi: Math.round(sospesiSum * sign * 100) / 100,
       ignored: Math.round(ignoredSum * 100) / 100,
-      total: parsedInvoice.datiDocumento.importoTotale,
-      imponibileTotal: invoiceImponibile,
+      total: Math.round(Math.abs(parsedInvoice.datiDocumento.importoTotale) * sign * 100) / 100,
+      imponibileTotal: Math.round(invoiceImponibile * sign * 100) / 100,
+      isNotaDiCredito,
     };
-  }, [parsedInvoice, allocationMode, wholeInvoiceCantiereId, ddtAllocations, lineAllocations, excludedLines, invoiceImponibile]);
+  }, [parsedInvoice, allocationMode, wholeInvoiceCantiereId, ddtAllocations, lineAllocations, excludedLines, invoiceImponibile, isNotaDiCredito]);
 
   // Commit all allocations into movements and/or sospesi
   const handleConfirmAndCommit = (bypassDuplicateCheck = false) => {
@@ -662,6 +677,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
     const invoiceDate = parsedInvoice.datiDocumento.data;
     const supplierName = (parsedInvoice.cedentePrestatore.denominazione || '').toUpperCase().trim();
     const manualProt = (customProtocol && customProtocol.trim()) ? customProtocol.trim() : '';
+    const sign = isNotaDiCredito ? -1 : 1;
+    const signedInvoiceImponibile = sign * Math.abs(invoiceImponibile);
 
     // Check if invoice has already been imported
     if (!bypassDuplicateCheck) {
@@ -693,11 +710,13 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
           date: invoiceDate,
           docNumber: invoiceNum,
           supplier: supplierName,
-          description: `Fattura intera da attribuire (${parsedInvoice.righe.length} articoli - Imponibile)`,
-          amount: invoiceImponibile,
+          description: `${isNotaDiCredito ? '[NOTA DI CREDITO] ' : ''}Fattura intera da attribuire (${parsedInvoice.righe.length} articoli - Imponibile)`,
+          amount: signedInvoiceImponibile,
           protocol: manualProt || `FORN-XML-${invoiceNum}`,
           status: 'in_attesa_cliente',
-          customerNote: 'Da verificare a quale cantiere imputare l\'intera fornitura.',
+          customerNote: isNotaDiCredito
+            ? 'Nota di credito da verificare a quale cantiere imputare.'
+            : 'Da verificare a quale cantiere imputare l\'intera fornitura.',
           sourceFileName: parsedInvoice.fileName,
         });
       } else {
@@ -716,10 +735,10 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             docNumber: invoiceNum,
             typeAndSubject: wholeTypeAndSubject,
             protocol: manualProt || `FORN-XML-${invoiceNum}`,
-            purchases: invoiceImponibile,
+            purchases: signedInvoiceImponibile,
             issued: 0,
             source: 'xml',
-            notes: `Importazione XML: ${parsedInvoice.fileName} - Fattura ${invoiceNum} (Totale Imponibile: € ${invoiceImponibile.toFixed(2)})`,
+            notes: `${isNotaDiCredito ? 'NOTA DI CREDITO - ' : ''}Importazione XML: ${parsedInvoice.fileName} - Fattura ${invoiceNum} (Totale Imponibile: € ${signedInvoiceImponibile.toFixed(2)})`,
             xmlRef: {
               supplier: supplierName,
               invoiceNum: invoiceNum,
@@ -753,8 +772,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         const activeLines = connectedLines.filter((r) => !excludedLines[r.numeroLinea]);
 
         const ddtActiveTotal = connectedLines.length > 0
-          ? Math.round(activeLines.reduce((sum, r) => sum + r.prezzoTotale, 0) * 100) / 100
-          : (ddt.totaleDDT || 0);
+          ? Math.round(activeLines.reduce((sum, r) => sum + Math.abs(r.prezzoTotale), 0) * 100) / 100
+          : Math.abs(ddt.totaleDDT || 0);
 
         if (ddtActiveTotal <= 0) {
           // All lines excluded by user for this DDT
@@ -769,13 +788,15 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             date: ddt.dataDDT || invoiceDate,
             docNumber: invoiceNum,
             supplier: supplierName,
-            description: `${customDdtName}: ${descSummary}`,
-            amount: ddtActiveTotal,
+            description: `${isNotaDiCredito ? '[NOTA DI CREDITO] ' : ''}${customDdtName}: ${descSummary}`,
+            amount: sign * Math.abs(ddtActiveTotal),
             ddtNumber: customDdtName,
             ddtDate: ddt.dataDDT,
             protocol: manualProt || customDdtName,
             status: 'in_attesa_cliente',
-            customerNote: 'DDT in attesa di destinazione da parte del committente/capocantiere.',
+            customerNote: isNotaDiCredito
+              ? 'Nota di credito / DDT da stornare in attesa di chiarimento.'
+              : 'DDT in attesa di destinazione da parte del committente/capocantiere.',
             sourceFileName: parsedInvoice.fileName,
           });
         } else if (alloc.isSplit && alloc.splits.length > 0) {
@@ -789,13 +810,15 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                 date: ddt.dataDDT || invoiceDate,
                 docNumber: invoiceNum,
                 supplier: supplierName,
-                description: `${customDdtName} (quota ${sp.percentage}%): ${descSummary}`,
-                amount: splitAmount,
+                description: `${isNotaDiCredito ? '[NOTA DI CREDITO] ' : ''}${customDdtName} (quota ${sp.percentage}%): ${descSummary}`,
+                amount: sign * Math.abs(splitAmount),
                 ddtNumber: customDdtName,
                 ddtDate: ddt.dataDDT,
                 protocol: manualProt || customDdtName,
                 status: 'in_attesa_cliente',
-                customerNote: `Quota ${sp.percentage}% da definire col cliente.`,
+                customerNote: isNotaDiCredito
+                  ? `Nota di credito: quota ${sp.percentage}% da stornare.`
+                  : `Quota ${sp.percentage}% da definire col cliente.`,
                 sourceFileName: parsedInvoice.fileName,
               });
             } else {
@@ -855,6 +878,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
         const dates = group.ddtItems.map((d) => d.dataDDT).filter(Boolean) as string[];
         const movementDate = dates.length > 0 ? dates.sort().reverse()[0] : invoiceDate;
+        const signedPurchases = sign * Math.abs(roundedTotal);
 
         commitList.push({
           cantiereId,
@@ -864,10 +888,10 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             docNumber,
             typeAndSubject,
             protocol,
-            purchases: roundedTotal,
+            purchases: signedPurchases,
             issued: 0,
             source: 'xml',
-            notes: `Fattura ${invoiceNum} - Totale unico di ${group.ddtItems.length} DDT (${ddtNamesOnly})`,
+            notes: `${isNotaDiCredito ? 'NOTA DI CREDITO - ' : ''}Fattura ${invoiceNum} - Totale unico di ${group.ddtItems.length} DDT (${ddtNamesOnly})`,
             xmlRef: {
               supplier: supplierName,
               invoiceNum: invoiceNum,
@@ -894,13 +918,15 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             date: line.ddtData || invoiceDate,
             docNumber: lineDocNumber,
             supplier: supplierName,
-            description: `[R${line.numeroLinea}] ${line.descrizione}`,
-            amount: line.prezzoTotale,
+            description: `${isNotaDiCredito ? '[NOTA DI CREDITO] ' : ''}[R${line.numeroLinea}] ${line.descrizione}`,
+            amount: sign * Math.abs(line.prezzoTotale),
             ddtNumber: lineDdtName || line.ddtNumero,
             ddtDate: line.ddtData,
             protocol: manualProt || `RIGA-${line.numeroLinea}`,
             status: 'in_attesa_cliente',
-            customerNote: 'Articolo non attribuito da chiarire con il cliente.',
+            customerNote: isNotaDiCredito
+              ? 'Nota di credito / storno articolo da chiarire col cliente.'
+              : 'Articolo non attribuito da chiarire con il cliente.',
             sourceFileName: parsedInvoice.fileName,
           });
         } else if (alloc.isSplit && alloc.splits.length > 0) {
@@ -913,13 +939,15 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                 date: line.ddtData || invoiceDate,
                 docNumber: lineDocNumber,
                 supplier: supplierName,
-                description: `[R${line.numeroLinea}] ${line.descrizione} (quota ${sp.percentage}%)`,
-                amount: sp.amount,
+                description: `${isNotaDiCredito ? '[NOTA DI CREDITO] ' : ''}[R${line.numeroLinea}] ${line.descrizione} (quota ${sp.percentage}%)`,
+                amount: sign * Math.abs(sp.amount),
                 ddtNumber: lineDdtName || line.ddtNumero,
                 ddtDate: line.ddtData,
                 protocol: manualProt || `RIGA-${line.numeroLinea}`,
                 status: 'in_attesa_cliente',
-                customerNote: `Quota riga ${line.numeroLinea} (${sp.percentage}%) da attribuire.`,
+                customerNote: isNotaDiCredito
+                  ? `Nota di credito: quota riga ${line.numeroLinea} (${sp.percentage}%) da stornare.`
+                  : `Quota riga ${line.numeroLinea} (${sp.percentage}%) da attribuire.`,
                 sourceFileName: parsedInvoice.fileName,
               });
             } else {
@@ -931,10 +959,10 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                   docNumber: lineDocNumber,
                   typeAndSubject: `${supplierName} - [R${line.numeroLinea}] ${line.descrizione} (quota ${sp.percentage}%)`,
                   protocol: manualProt || `RIGA-${line.numeroLinea}`,
-                  purchases: sp.amount,
+                  purchases: sign * Math.abs(sp.amount),
                   issued: 0,
                   source: 'xml',
-                  notes: `Quota riga ${line.numeroLinea} (${sp.percentage}%)`,
+                  notes: `${isNotaDiCredito ? 'NOTA DI CREDITO - ' : ''}Quota riga ${line.numeroLinea} (${sp.percentage}%)`,
                   xmlRef: {
                     supplier: supplierName,
                     invoiceNum: invoiceNum,
@@ -952,10 +980,10 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
               docNumber: lineDocNumber,
               typeAndSubject: `${supplierName} - [R${line.numeroLinea}] ${line.descrizione}`,
               protocol: manualProt || `RIGA-${line.numeroLinea}`,
-              purchases: line.prezzoTotale,
+              purchases: sign * Math.abs(line.prezzoTotale),
               issued: 0,
               source: 'xml',
-              notes: line.codiceArticolo ? `Cod. Art.: ${line.codiceArticolo}` : undefined,
+              notes: `${isNotaDiCredito ? 'NOTA DI CREDITO' : ''}${line.codiceArticolo ? ` - Cod. Art.: ${line.codiceArticolo}` : ''}`.trim() || undefined,
               xmlRef: {
                 supplier: supplierName,
                 invoiceNum: invoiceNum,
@@ -1130,11 +1158,11 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                   </div>
 
                   {/* Manual Protocol Number Box (N./PROT) from Accounting */}
-                  <div className="bg-slate-900 border-2 border-indigo-500/50 rounded-xl p-2.5 text-left min-w-[220px] shadow-sm bg-gradient-to-br from-slate-900 to-indigo-950/30">
+                  <div className="bg-slate-900 border-2 border-indigo-500/50 rounded-xl p-2.5 text-left min-w-[210px] shadow-sm bg-gradient-to-br from-slate-900 to-indigo-950/30">
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <label htmlFor="custom-protocol-num" className="text-[11px] font-bold text-indigo-300 flex items-center gap-1">
                         <FileText className="h-3 w-3 text-indigo-400" />
-                        <span>N./PROT (Protocollo Contabile):</span>
+                        <span>N./PROT (Protocollo):</span>
                       </label>
                       <span className="text-[9px] font-black uppercase px-1.5 py-0.2 bg-indigo-500/20 text-indigo-300 rounded border border-indigo-500/30">
                         A mano
@@ -1155,18 +1183,90 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                     <span className="text-[10px] text-slate-400 block mt-1">
                       {customProtocol.trim() ? (
                         <span className="text-emerald-300 font-semibold">
-                          ✓ Protocollo assegnato: <strong className="font-mono text-white">{customProtocol.trim()}</strong>
+                          ✓ Protocollo: <strong className="font-mono text-white">{customProtocol.trim()}</strong>
                         </span>
                       ) : (
-                        <span>Protocollo di contabilità da inserire nella colonna <strong className="text-white">N./PROT</strong></span>
+                        <span>Inserisci protocollo per colonna <strong className="text-white">N./PROT</strong></span>
+                      )}
+                    </span>
+                  </div>
+
+                  {/* Tipo Documento: Fattura vs Nota di Credito (Storno con segno -) */}
+                  <div className={`rounded-xl p-2.5 text-left min-w-[230px] shadow-sm border transition-all ${
+                    isNotaDiCredito
+                      ? 'bg-gradient-to-br from-rose-950/70 via-slate-900 to-rose-900/40 border-rose-500/70 shadow-rose-950/30 ring-1 ring-rose-500/30'
+                      : 'bg-slate-900 border-slate-700/80'
+                  }`}>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
+                        <FileText className={`h-3 w-3 ${isNotaDiCredito ? 'text-rose-400' : 'text-slate-400'}`} />
+                        <span>Tipo Documento:</span>
+                      </span>
+                      {isNotaDiCredito ? (
+                        <span className="text-[9px] font-black uppercase px-1.5 py-0.2 bg-rose-500/20 text-rose-300 rounded border border-rose-500/40 flex items-center gap-0.5">
+                          <MinusCircle className="h-2.5 w-2.5" />
+                          SEGNO (-)
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.2 bg-slate-800 text-slate-400 rounded border border-slate-700">
+                          Normale (+)
+                        </span>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsNotaDiCredito((prev) => !prev)}
+                      className={`w-full py-1.5 px-2.5 rounded-lg text-xs font-bold flex items-center justify-between gap-1.5 transition-all cursor-pointer shadow-sm ${
+                        isNotaDiCredito
+                          ? 'bg-rose-600 hover:bg-rose-500 text-white border border-rose-400 shadow-rose-900/40'
+                          : 'bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-600 hover:border-slate-500'
+                      }`}
+                      title={
+                        isNotaDiCredito
+                          ? 'Nota di credito attiva: gli importi avranno il segno meno (-). Clicca per commutare a fattura standard.'
+                          : 'Clicca per indicare che si tratta di una Nota di Credito (importi con segno meno -)'
+                      }
+                    >
+                      <div className="flex items-center gap-1.5 truncate">
+                        {isNotaDiCredito ? (
+                          <>
+                            <MinusCircle className="h-3.5 w-3.5 text-white shrink-0" />
+                            <span className="truncate">NOTA DI CREDITO</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                            <span className="truncate">Fattura Standard</span>
+                          </>
+                        )}
+                      </div>
+                      <span className={`text-[10px] uppercase font-black px-1.5 py-0.5 rounded shrink-0 ${
+                        isNotaDiCredito ? 'bg-black/30 text-rose-100' : 'bg-slate-900 text-amber-300'
+                      }`}>
+                        {isNotaDiCredito ? 'Storno (-)' : 'Commuta'}
+                      </span>
+                    </button>
+
+                    <span className="text-[10px] block mt-1 leading-tight">
+                      {isNotaDiCredito ? (
+                        <span className="text-rose-300 font-semibold">
+                          ✓ Importo con <strong className="text-white underline">segno meno (-)</strong>
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">
+                          Clicca se è una <strong className="text-slate-300">Nota di Credito</strong>
+                        </span>
                       )}
                     </span>
                   </div>
 
                   <div className="pl-4 border-l border-slate-800 text-right">
-                    <span className="text-xs text-slate-400 block">Totale Documento:</span>
-                    <span className="text-xl font-black font-mono text-emerald-400">
-                      {formatCurrency(parsedInvoice.datiDocumento.importoTotale)}
+                    <span className="text-xs text-slate-400 block">
+                      {isNotaDiCredito ? 'Totale Nota di Credito:' : 'Totale Documento:'}
+                    </span>
+                    <span className={`text-xl font-black font-mono ${isNotaDiCredito ? 'text-rose-400' : 'text-emerald-400'}`}>
+                      {formatCurrency(computedStats.total)}
                     </span>
                   </div>
 
@@ -1318,10 +1418,17 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                     }`}
                   >
                     <div className="font-bold text-white flex items-center gap-1.5">
-                      <span>1. Intera Fattura a 1 Cantiere</span>
+                      <span>1. Intera {isNotaDiCredito ? 'Nota di Credito' : 'Fattura'} a 1 Cantiere</span>
+                      {isNotaDiCredito && (
+                        <span className="text-[9px] font-black px-1.5 py-0.2 bg-rose-500/20 text-rose-300 rounded border border-rose-500/40">
+                          - €
+                        </span>
+                      )}
                     </div>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      Assegna il totale imponibile (€ {invoiceImponibile.toFixed(2)}) a una sola scheda (Iva esclusa).
+                      {isNotaDiCredito
+                        ? `Assegna il totale nota di credito (- € ${invoiceImponibile.toFixed(2)}) a una sola scheda (Iva esclusa).`
+                        : `Assegna il totale imponibile (€ ${invoiceImponibile.toFixed(2)}) a una sola scheda (Iva esclusa).`}
                     </p>
                   </button>
 
@@ -1369,14 +1476,31 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                 <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                     <label className="block text-xs font-bold text-slate-300">
-                      Seleziona la Destinazione Contabile dell'Intera Fattura (Imponibile: € {invoiceImponibile.toFixed(2)}):
+                      {isNotaDiCredito ? (
+                        <span>
+                          Seleziona la Destinazione Contabile della <strong className="text-rose-400 uppercase">Nota di Credito</strong> (Imponibile storno: <strong className="text-rose-300 font-mono">- € {invoiceImponibile.toFixed(2)}</strong>):
+                        </span>
+                      ) : (
+                        <span>
+                          Seleziona la Destinazione Contabile dell'Intera Fattura (Imponibile: <strong className="text-emerald-300 font-mono">€ {invoiceImponibile.toFixed(2)}</strong>):
+                        </span>
+                      )}
                     </label>
                     {parsedInvoice.datiDocumento.riepilogoIVA && parsedInvoice.datiDocumento.riepilogoIVA.length > 1 && (
                       <span className="text-[11px] text-amber-300 font-semibold bg-amber-500/10 px-2.5 py-0.5 rounded border border-amber-500/30">
-                        {parsedInvoice.datiDocumento.riepilogoIVA.length} aliquote IVA considerate: Tot. Imponibile € {invoiceImponibile.toFixed(2)}
+                        {parsedInvoice.datiDocumento.riepilogoIVA.length} aliquote IVA considerate: Tot. Imponibile {isNotaDiCredito ? '- ' : ''}€ {invoiceImponibile.toFixed(2)}
                       </span>
                     )}
                   </div>
+
+                  {isNotaDiCredito && (
+                    <div className="bg-rose-500/10 border border-rose-500/30 rounded-lg p-2.5 text-xs text-rose-200 flex items-center gap-2">
+                      <MinusCircle className="h-4 w-4 text-rose-400 shrink-0" />
+                      <span>
+                        <strong>Nota di Credito:</strong> L'importo imponibile di <span className="font-mono font-bold text-white">- € {invoiceImponibile.toFixed(2)}</span> verrà importato nel cantiere con <strong>segno meno (-)</strong> riducendo gli acquisti.
+                      </span>
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2">
                     <select
@@ -1422,8 +1546,16 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
               {/* Mode 2: By DDT Selection */}
               {allocationMode === 'by_ddt' && (
                 <div className="space-y-3">
-                  <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                    Assegna ciascun Documento di Trasporto (DDT) al cantiere di competenza:
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Assegna ciascun Documento di Trasporto (DDT) al cantiere di competenza:
+                    </div>
+                    {isNotaDiCredito && (
+                      <span className="text-[11px] font-bold text-rose-300 bg-rose-500/20 px-2.5 py-0.5 rounded border border-rose-500/30 flex items-center gap-1 self-start sm:self-auto">
+                        <MinusCircle className="h-3 w-3 text-rose-400" />
+                        <span>Nota di Credito: importi con segno meno (-)</span>
+                      </span>
+                    )}
                   </div>
 
                   <div className="space-y-3">
@@ -1852,11 +1984,13 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                       const connected = parsedInvoice.righe.filter((r) => ddt.riferimentoLinee.includes(r.numeroLinea));
                       const active = connected.filter((r) => !excludedLines[r.numeroLinea]);
                       const activeTot = connected.length > 0
-                        ? active.reduce((s, r) => s + r.prezzoTotale, 0)
-                        : (ddt.totaleDDT || 0);
+                        ? active.reduce((s, r) => s + Math.abs(r.prezzoTotale), 0)
+                        : Math.abs(ddt.totaleDDT || 0);
                       if (activeTot <= 0) return;
 
                       const dName = getDdtDisplayName(ddt.numeroDDT);
+                      const ddtFormattedTag = formatSingleDdtTag(dName, ddt.dataDDT);
+
                       if (!previewMap.has(alloc.targetCantiereId)) {
                         previewMap.set(alloc.targetCantiereId, {
                           cantiereName: `${cantiereObj.name} (${cantiereObj.client} - ${cantiereObj.city})`,
@@ -1866,7 +2000,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                         });
                       }
                       const entry = previewMap.get(alloc.targetCantiereId)!;
-                      entry.ddtLabels.push(dName);
+                      entry.ddtLabels.push(ddtFormattedTag);
                       entry.ddtNames.push(dName);
                       entry.total += activeTot;
                     });
@@ -1902,29 +2036,31 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                 <div className="text-[11px] text-slate-300">
                                   <span className="text-slate-400 font-semibold">TIPO DOC / FORNITORE / CLIENTE: </span>
                                   <span className="font-mono text-emerald-300 font-bold">
-                                    {parsedInvoice.cedentePrestatore.denominazione} ({pe.ddtLabels.join(', ')})
+                                    {buildFormattedTypeAndSubject(parsedInvoice.cedentePrestatore.denominazione, pe.ddtLabels)}
                                   </span>
                                 </div>
                                 <div className="text-[11px] text-slate-300 flex items-center gap-2 flex-wrap">
                                   <span>
                                     <span className="text-slate-400 font-semibold">N° DOC.: </span>
                                     <span className="font-mono text-amber-300 font-bold">
-                                      {finalInvNum} / {pe.ddtNames.join(', ')}
+                                      {finalInvNum}
                                     </span>
                                   </span>
                                   <span className="text-slate-600">•</span>
                                   <span>
                                     <span className="text-slate-400 font-semibold">N./PROT: </span>
                                     <span className="font-mono text-slate-300">
-                                      {pe.ddtNames.length === 1 ? pe.ddtNames[0] : 'DDT-VARI'}
+                                      {customProtocol ? customProtocol.trim() : (pe.ddtNames.length === 1 ? pe.ddtNames[0] : 'DDT-VARI')}
                                     </span>
                                   </span>
                                 </div>
                               </div>
                               <div className="text-right shrink-0 bg-slate-950 px-3 py-2 rounded-lg border border-slate-800">
-                                <span className="text-[10px] text-slate-400 block uppercase font-bold">Totale Acquisti:</span>
-                                <span className="font-mono text-base font-black text-rose-300">
-                                  {formatCurrency(pe.total)}
+                                <span className="text-[10px] text-slate-400 block uppercase font-bold">
+                                  {isNotaDiCredito ? 'Storno Acquisti (-):' : 'Totale Acquisti:'}
+                                </span>
+                                <span className={`font-mono text-base font-black ${isNotaDiCredito ? 'text-rose-400' : 'text-rose-300'}`}>
+                                  {formatCurrency((isNotaDiCredito ? -1 : 1) * pe.total)}
                                 </span>
                               </div>
                             </div>
@@ -1939,9 +2075,16 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
               {/* Mode 3: By Line Selection */}
               {allocationMode === 'by_line' && (
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-400">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs font-bold uppercase tracking-wider text-slate-400">
                     <span>Righe di Dettaglio Materiali ({parsedInvoice.righe.length}):</span>
-                    <span>Assegnazione / Ripartizione</span>
+                    {isNotaDiCredito ? (
+                      <span className="text-[11px] font-bold text-rose-300 bg-rose-500/20 px-2.5 py-0.5 rounded border border-rose-500/30 flex items-center gap-1">
+                        <MinusCircle className="h-3 w-3 text-rose-400" />
+                        <span>Nota di Credito: importi delle righe con segno meno (-)</span>
+                      </span>
+                    ) : (
+                      <span>Assegnazione / Ripartizione</span>
+                    )}
                   </div>
 
                   <div className="space-y-3">
@@ -2203,13 +2346,21 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-slate-900/90 p-3 rounded-xl border border-slate-800">
               {/* Primary Accounting Comparison Box */}
               <div className="flex flex-wrap items-center gap-3 text-xs">
-                <div className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-500/40 px-3 py-2 rounded-lg">
-                  <Building className="h-4 w-4 text-emerald-400 shrink-0" />
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
+                  isNotaDiCredito
+                    ? 'bg-rose-950/60 border-rose-500/50'
+                    : 'bg-emerald-950/60 border-emerald-500/40'
+                }`}>
+                  <Building className={`h-4 w-4 shrink-0 ${isNotaDiCredito ? 'text-rose-400' : 'text-emerald-400'}`} />
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-emerald-400 block tracking-wider">
+                    <span className={`text-[10px] uppercase font-bold block tracking-wider ${
+                      isNotaDiCredito ? 'text-rose-400' : 'text-emerald-400'
+                    }`}>
                       Totale Imponibile Destinato:
                     </span>
-                    <span className="text-base font-black font-mono text-emerald-300">
+                    <span className={`text-base font-black font-mono ${
+                      isNotaDiCredito ? 'text-rose-300' : 'text-emerald-300'
+                    }`}>
                       {formatCurrency(computedStats.cantieri)}
                     </span>
                   </div>
@@ -2218,12 +2369,17 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                 <div className="flex items-center gap-2 bg-slate-950 border border-slate-700 px-3 py-2 rounded-lg">
                   <div>
                     <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
-                      Totale Imponibile Fattura (Contabilità):
+                      Totale Imponibile {isNotaDiCredito ? 'Nota di Credito' : 'Fattura'} (Contabilità):
                     </span>
-                    <span className="text-base font-black font-mono text-white">
-                      {formatCurrency(invoiceImponibile)}
+                    <span className={`text-base font-black font-mono ${isNotaDiCredito ? 'text-rose-300' : 'text-white'}`}>
+                      {formatCurrency(computedStats.imponibileTotal)}
                     </span>
                   </div>
+                  {isNotaDiCredito && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 uppercase">
+                      Nota di Credito (-)
+                    </span>
+                  )}
                   {parsedInvoice.datiDocumento.riepilogoIVA && parsedInvoice.datiDocumento.riepilogoIVA.length > 1 && (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
                       {parsedInvoice.datiDocumento.riepilogoIVA.length} aliquote IVA
@@ -2233,7 +2389,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
                 {/* Match / Difference status badge */}
                 <div className="flex items-center">
-                  {Math.abs(computedStats.cantieri - invoiceImponibile) < 0.01 ? (
+                  {Math.abs(computedStats.cantieri - computedStats.imponibileTotal) < 0.01 ? (
                     <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300 bg-emerald-500/10 px-3 py-2 rounded-lg border border-emerald-500/30">
                       <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
                       <span>Coincide con l'imponibile contabile (100%)</span>
@@ -2243,9 +2399,9 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                       <div className="flex items-center gap-1.5 font-bold text-amber-300">
                         <Info className="h-3.5 w-3.5 text-amber-400 shrink-0" />
                         <span>
-                          {computedStats.cantieri < invoiceImponibile
-                            ? `Mancano ${formatCurrency(invoiceImponibile - computedStats.cantieri)} all'imponibile contabile`
-                            : `Supera di ${formatCurrency(computedStats.cantieri - invoiceImponibile)} l'imponibile contabile`}
+                          {Math.abs(computedStats.cantieri) < Math.abs(computedStats.imponibileTotal)
+                            ? `Mancano ${formatCurrency(Math.abs(computedStats.imponibileTotal) - Math.abs(computedStats.cantieri))} all'imponibile contabile`
+                            : `Supera di ${formatCurrency(Math.abs(computedStats.cantieri) - Math.abs(computedStats.imponibileTotal))} l'imponibile contabile`}
                         </span>
                       </div>
                       <div className="text-[10px] text-slate-400">
@@ -2258,7 +2414,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
               {/* Secondary details and Total doc */}
               <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400 shrink-0">
-                <span className="hidden xl:inline">Tot. Doc (con IVA): <strong className="text-slate-300">{formatCurrency(computedStats.total)}</strong></span>
+                <span className="hidden xl:inline">Tot. Doc (con IVA): <strong className={isNotaDiCredito ? 'text-rose-300' : 'text-slate-300'}>{formatCurrency(computedStats.total)}</strong></span>
               </div>
             </div>
           )}
