@@ -1,4 +1,5 @@
 import { Cantiere, Movement, SospesoItem } from '../types';
+import { formatDateItalian } from './calculations';
 
 export interface InvoiceLocation {
   type: 'cantiere' | 'sospesi';
@@ -94,7 +95,7 @@ export function extractSupplierFromMovement(mov: Movement): string {
   } else if (clean.includes(' - ')) {
     clean = clean.split(' - ')[0].trim();
   }
-  return clean;
+  return clean.toUpperCase();
 }
 
 /**
@@ -295,3 +296,115 @@ export function findLinkedInvoiceMovementsAcrossCantieri(
     sospesiMatches,
   };
 }
+
+/**
+ * Formats a DDT label strictly as:
+ * "DDT N. <numero> DEL <data in DD/MM/YYYY>" or "DDT N. <numero>" if no date.
+ */
+export function formatSingleDdtTag(ddtNum?: string, ddtDate?: string): string {
+  if (!ddtNum || !ddtNum.trim()) return '';
+  let cleanNum = ddtNum.trim();
+  // Strip any existing DDT prefixes like "DDT ", "DDT N. ", "DDT-", "DDT:"
+  cleanNum = cleanNum.replace(/^DDT\s*(N\.?|NUM\.?|NUMERO)?\s*[-:]?\s*/i, '').trim();
+
+  let dateFormatted = '';
+  // Check if date is already in the string (e.g. "101 DEL 12/02/2026" or "101 del 2026-02-12")
+  const delMatch = cleanNum.match(/^(.*?)\s+DEL\s+(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}\-\d{1,2}\-\d{1,2})$/i);
+  if (delMatch) {
+    cleanNum = delMatch[1].trim();
+    dateFormatted = formatDateItalian(delMatch[2]);
+  } else if (ddtDate) {
+    dateFormatted = formatDateItalian(ddtDate);
+  }
+
+  // Also remove percentage tags like "(50%)" or other parenthetical notes from the DDT number
+  cleanNum = cleanNum.replace(/\s*\([^)]*\)/g, '').trim();
+
+  // If cleanNum starts with ":" or "-", strip it
+  cleanNum = cleanNum.replace(/^[-:]\s*/, '').trim();
+
+  if (dateFormatted && dateFormatted !== '-') {
+    return `DDT N. ${cleanNum} DEL ${dateFormatted}`;
+  }
+  return `DDT N. ${cleanNum}`;
+}
+
+/**
+ * Extracts and standardizes DDT entries from a typeAndSubject string.
+ * Example input: "SONEPAR ITALIA (DDT N. 101 DEL 12/02/2026, DDT N. 102 DEL 15/02/2026)"
+ * Returns: ["DDT N. 101 DEL 12/02/2026", "DDT N. 102 DEL 15/02/2026"]
+ */
+export function extractDdtEntriesFromTypeAndSubject(typeAndSubject?: string, defaultDate?: string): string[] {
+  if (!typeAndSubject) return [];
+  const entries: string[] = [];
+
+  const parenMatch = typeAndSubject.match(/\(([^)]+)\)/);
+  if (parenMatch) {
+    const inside = parenMatch[1];
+    // Split by comma
+    const rawItems = inside.split(',').map((x) => x.trim()).filter(Boolean);
+    for (const raw of rawItems) {
+      const formatted = formatSingleDdtTag(raw, defaultDate);
+      if (formatted) {
+        entries.push(formatted);
+      }
+    }
+  } else {
+    // Check if there is "DDT ..." in the text without parens
+    const ddtMatch = typeAndSubject.match(/DDT\s*[^,;:)]+/gi);
+    if (ddtMatch) {
+      for (const d of ddtMatch) {
+        const formatted = formatSingleDdtTag(d, defaultDate);
+        if (formatted) {
+          entries.push(formatted);
+        }
+      }
+    }
+  }
+
+  return Array.from(new Set(entries));
+}
+
+/**
+ * Builds the strict Tipo Doc. / Fornitore string:
+ * "<FORNITORE IN MAIUSCOLO> (DDT N. <X> DEL <DATA>, DDT N. <Y> DEL <DATA>)"
+ * and NIENT'ALTRO.
+ */
+export function buildFormattedTypeAndSubject(supplier: string, ddtEntries: string[]): string {
+  const cleanSupplier = (supplier || 'FORNITORE NON SPECIFICATO').toUpperCase().trim();
+  const validDdtEntries = Array.from(new Set(ddtEntries.filter(Boolean)));
+  if (validDdtEntries.length > 0) {
+    return `${cleanSupplier} (${validDdtEntries.join(', ')})`;
+  }
+  return cleanSupplier;
+}
+
+/**
+ * Merges existing typeAndSubject with new DDT entries, keeping strictly:
+ * "<FORNITORE> (DDT N. <X> DEL <DATA>, ...)"
+ * and NIENT'ALTRO.
+ */
+export function mergeTypeAndSubject(
+  existingTypeAndSubject: string,
+  newDdtEntries: string[],
+  fallbackSupplier?: string,
+  movementDate?: string
+): string {
+  let supplier = extractSupplierFromMovement({ typeAndSubject: existingTypeAndSubject } as Movement);
+  if (!supplier || supplier === 'FORNITORE NON SPECIFICATO') {
+    supplier = (fallbackSupplier || 'FORNITORE NON SPECIFICATO').toUpperCase().trim();
+  }
+
+  const existingEntries = extractDdtEntriesFromTypeAndSubject(existingTypeAndSubject, movementDate);
+  const combinedSet = new Set<string>();
+
+  for (const e of existingEntries) {
+    if (e) combinedSet.add(e);
+  }
+  for (const n of newDdtEntries) {
+    if (n) combinedSet.add(n);
+  }
+
+  return buildFormattedTypeAndSubject(supplier, Array.from(combinedSet));
+}
+

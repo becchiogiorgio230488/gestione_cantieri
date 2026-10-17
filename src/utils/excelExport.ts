@@ -753,15 +753,24 @@ export async function exportSospesiExcel(sospesi: SospesoItem[], artigianoName?:
   });
 
   ws.columns = [
-    { key: 'colA', width: 14 },
-    { key: 'colB', width: 22 },
-    { key: 'colC', width: 34 },
-    { key: 'colD', width: 44 },
-    { key: 'colE', width: 18 },
-    { key: 'colF', width: 34 },
+    { key: 'colA', width: 14 }, // DATA DOC.
+    { key: 'colB', width: 16 }, // N° DOC.
+    { key: 'colC', width: 36 }, // TIPO DOC. / FORNITORE
+    { key: 'colD', width: 24 }, // CLIENTE
+    { key: 'colE', width: 16 }, // N./PROT
+    { key: 'colF', width: 18 }, // IMPORTO (€)
+    { key: 'colG', width: 40 }, // NOTE PER IL CLIENTE
   ];
 
-  const header = ws.addRow(['DATA', 'N° DOC / DDT', 'FORNITORE', 'DESCRIZIONE MERCI / MATERIALI', 'IMPORTO (€)', 'NOTE / CANTIERE']);
+  const header = ws.addRow([
+    'DATA DOC.',
+    'N° DOC.',
+    'TIPO DOC. / FORNITORE',
+    'CLIENTE',
+    'N./PROT',
+    'IMPORTO (€)',
+    'NOTE PER IL CLIENTE',
+  ]);
   header.height = 24;
   header.eachCell((cell) => {
     cell.font = { name: 'Calibri', size: 10, bold: true };
@@ -770,11 +779,13 @@ export async function exportSospesiExcel(sospesi: SospesoItem[], artigianoName?:
   });
 
   sospesi.forEach((s) => {
+    const supplierFull = s.ddtNumber ? `${s.supplier} (${s.ddtNumber})` : s.supplier;
     const row = ws.addRow([
       formatDateItalian(s.date),
       s.docNumber,
-      s.supplier,
-      s.description,
+      supplierFull,
+      s.client || '',
+      s.protocol || '',
       Number(s.amount) || 0,
       s.customerNote || '',
     ]);
@@ -782,7 +793,7 @@ export async function exportSospesiExcel(sospesi: SospesoItem[], artigianoName?:
     row.eachCell((cell, colNum) => {
       cell.border = thinBlackBorder;
       cell.font = { name: 'Calibri', size: 10 };
-      if (colNum === 5) {
+      if (colNum === 6) {
         cell.numFmt = currencyFormat;
         cell.alignment = { horizontal: 'right' };
       }
@@ -790,12 +801,12 @@ export async function exportSospesiExcel(sospesi: SospesoItem[], artigianoName?:
   });
 
   const totSospesi = sospesi.reduce((acc, s) => acc + (Number(s.amount) || 0), 0);
-  const totRow = ws.addRow(['', '', '', 'TOTALE MATERIALI SOSPESI:', totSospesi, '']);
+  const totRow = ws.addRow(['', '', '', '', 'TOTALE MATERIALI SOSPESI:', totSospesi, '']);
   totRow.height = 22;
   totRow.eachCell((cell, colNum) => {
     cell.border = thinBlackBorder;
     cell.font = { name: 'Calibri', size: 10, bold: true };
-    if (colNum === 5) {
+    if (colNum === 6) {
       cell.numFmt = currencyFormat;
       cell.alignment = { horizontal: 'right' };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };

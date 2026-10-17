@@ -70,6 +70,7 @@ export function parseFatturaElettronicaXML(xmlString: string, fileName = 'fattur
         const cognome = getTagText(anagraficaEl, 'Cognome');
         denominazione = `${nome} ${cognome}`.trim();
       }
+      denominazione = (denominazione || '').toUpperCase().trim();
     }
     const idFiscaleIVA = getElements(cedenteEl, 'IdFiscaleIVA')[0];
     if (idFiscaleIVA) {
@@ -211,7 +212,7 @@ export function parseFatturaElettronicaXML(xmlString: string, fileName = 'fattur
   return {
     fileName,
     cedentePrestatore: {
-      denominazione: denominazione || 'Fornitore non specificato',
+      denominazione: (denominazione || 'FORNITORE NON SPECIFICATO').toUpperCase().trim(),
       partitaIva: partitaIva || 'N/D',
       codiceFiscale,
       indirizzo,

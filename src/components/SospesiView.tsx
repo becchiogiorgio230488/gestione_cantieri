@@ -19,6 +19,8 @@ import {
   Search,
   CheckSquare,
   Square,
+  Lock,
+  EyeOff,
 } from 'lucide-react';
 import { Cantiere, SospesoItem, Movement } from '../types';
 import { formatCurrency, formatDateItalian, getTodayISODate } from '../utils/calculations';
@@ -31,6 +33,7 @@ interface SospesiViewProps {
   artigianoName?: string;
   onBack?: () => void;
   onAssignToCantiere: (sospesoId: string, targetCantiereId: string) => void;
+  onAssignMultipleToCantiere?: (sospesiIds: string[], targetCantiereId: string) => void;
   onUpdateSospeso: (updated: SospesoItem) => void;
   onDeleteSospeso: (id: string) => void;
   onDeleteMultipleSospesi?: (ids: string[]) => void;
@@ -45,6 +48,7 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
   artigianoName,
   onBack,
   onAssignToCantiere,
+  onAssignMultipleToCantiere,
   onUpdateSospeso,
   onDeleteSospeso,
   onDeleteMultipleSospesi,
@@ -66,13 +70,20 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
   const [manualDate, setManualDate] = useState(getTodayISODate());
   const [manualDoc, setManualDoc] = useState('');
   const [manualSupplier, setManualSupplier] = useState('');
+  const [manualClient, setManualClient] = useState('');
+  const [manualProtocol, setManualProtocol] = useState('');
   const [manualDesc, setManualDesc] = useState('');
   const [manualAmount, setManualAmount] = useState('');
   const [manualNote, setManualNote] = useState('');
+  const [manualInternalNote, setManualInternalNote] = useState('');
 
-  // Editing existing note
+  // Editing customer note
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editNote, setEditNote] = useState('');
+
+  // Editing internal note (only visible on screen)
+  const [editingInternalNoteId, setEditingInternalNoteId] = useState<string | null>(null);
+  const [editInternalNote, setEditInternalNote] = useState('');
 
   const totSospesi = sospesi.reduce((acc, s) => acc + (Number(s.amount) || 0), 0);
 
@@ -83,6 +94,9 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
       s.docNumber.toLowerCase().includes(q) ||
       s.supplier.toLowerCase().includes(q) ||
       s.description.toLowerCase().includes(q) ||
+      (s.client && s.client.toLowerCase().includes(q)) ||
+      (s.protocol && s.protocol.toLowerCase().includes(q)) ||
+      (s.internalNote && s.internalNote.toLowerCase().includes(q)) ||
       (s.customerNote && s.customerNote.toLowerCase().includes(q))
     );
   });
@@ -154,8 +168,12 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
     const targetId = bulkTargetCantiereId || cantieri[0]?.id;
     if (!targetId || selectedIds.length === 0) return;
 
-    for (const id of selectedIds) {
-      onAssignToCantiere(id, targetId);
+    if (onAssignMultipleToCantiere) {
+      onAssignMultipleToCantiere(selectedIds, targetId);
+    } else {
+      for (const id of selectedIds) {
+        onAssignToCantiere(id, targetId);
+      }
     }
     setSelectedIds([]);
   };
@@ -171,20 +189,26 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
 
     onAddManualSospeso({
       date: manualDate,
-      docNumber: manualDoc,
-      supplier: manualSupplier,
+      docNumber: manualDoc.trim(),
+      supplier: manualSupplier.toUpperCase().trim(),
+      client: manualClient.trim() || undefined,
+      protocol: manualProtocol.trim() || undefined,
       description: manualDesc || 'Materiale da attribuire al cantiere',
       amount: amountNum,
       status: 'in_attesa_cliente',
-      customerNote: manualNote || undefined,
+      customerNote: manualNote.trim() || undefined,
+      internalNote: manualInternalNote.trim() || undefined,
     });
 
     setIsAdding(false);
     setManualDoc('');
     setManualSupplier('');
+    setManualClient('');
+    setManualProtocol('');
     setManualDesc('');
     setManualAmount('');
     setManualNote('');
+    setManualInternalNote('');
   };
 
   const handleStartEdit = (s: SospesoItem) => {
@@ -200,11 +224,25 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
     setEditingId(null);
   };
 
+  const handleStartEditInternalNote = (s: SospesoItem) => {
+    setEditingInternalNoteId(s.id);
+    setEditInternalNote(s.internalNote || '');
+  };
+
+  const handleSaveEditInternalNote = (s: SospesoItem) => {
+    onUpdateSospeso({
+      ...s,
+      internalNote: editInternalNote.trim() || undefined,
+    });
+    setEditingInternalNoteId(null);
+  };
+
   const handleExecuteAssign = (sospesoId: string) => {
     const targetCantiereId = selectedTargetByItem[sospesoId] || cantieri[0]?.id;
     if (!targetCantiereId) {
       return;
     }
+    setSelectedIds((prev) => prev.filter((id) => id !== sospesoId));
     onAssignToCantiere(sospesoId, targetCantiereId);
   };
 
@@ -369,8 +407,30 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
               />
             </div>
 
+            <div>
+              <label className="block text-slate-400 font-semibold mb-1">CLIENTE</label>
+              <input
+                type="text"
+                placeholder="es. Ditta Rossi / Committente"
+                value={manualClient}
+                onChange={(e) => setManualClient(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-400 font-semibold mb-1">N./PROT (PROTOCOLLO)</label>
+              <input
+                type="text"
+                placeholder="es. 142 o PROT-26/01"
+                value={manualProtocol}
+                onChange={(e) => setManualProtocol(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400 font-mono"
+              />
+            </div>
+
             <div className="sm:col-span-2">
-              <label className="block text-slate-400 font-semibold mb-1">DESCRIZIONE MATERIALE</label>
+              <label className="block text-slate-400 font-semibold mb-1">DESCRIZIONE MATERIALE / FORNITURA</label>
               <input
                 type="text"
                 placeholder="es. Fornitura pannelli isolanti e collante"
@@ -381,13 +441,27 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
             </div>
 
             <div className="sm:col-span-2">
-              <label className="block text-slate-400 font-semibold mb-1">NOTA PER IL CLIENTE</label>
+              <label className="block text-slate-400 font-semibold mb-1">NOTE PER IL CLIENTE (STAMPATA SUL REPORT)</label>
               <input
                 type="text"
                 placeholder="es. Chiedere conferma a quale cantiere appartiene"
                 value={manualNote}
                 onChange={(e) => setManualNote(e.target.value)}
                 className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div className="sm:col-span-4 bg-indigo-950/20 border border-indigo-500/30 p-2.5 rounded-lg">
+              <label className="block text-indigo-300 font-semibold mb-1 flex items-center gap-1.5">
+                <Lock className="h-3 w-3 text-indigo-400" />
+                <span>NOTA INTERNA (SOLO A VIDEO - Non verrà stampata né esportata in Excel)</span>
+              </label>
+              <input
+                type="text"
+                placeholder="es. Da chiedere a Marco De Luca se l'ordine era per il cantiere Villa..."
+                value={manualInternalNote}
+                onChange={(e) => setManualInternalNote(e.target.value)}
+                className="w-full bg-slate-950 border border-indigo-500/40 rounded px-2.5 py-1.5 text-indigo-100 placeholder-indigo-400/50 focus:outline-none focus:border-indigo-400"
               />
             </div>
           </div>
@@ -514,20 +588,27 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                     title="Seleziona / Deseleziona tutti"
                   />
                 </th>
-                <th className="py-3 px-3 w-28">DATA DOC.</th>
-                <th className="py-3 px-3.5 w-32">N° DOC. / DDT</th>
-                <th className="py-3 px-3.5 w-40">FORNITORE</th>
-                <th className="py-3 px-4">DESCRIZIONE MATERIALE / FORNITURA</th>
-                <th className="py-3 px-3.5 text-right w-28 text-rose-300">IMPORTO (€)</th>
-                <th className="py-3 px-4">NOTE PER IL CLIENTE</th>
-                <th className="py-3 px-4 w-72 text-center text-amber-400">ATTRIBUISCI A CANTIERE</th>
-                <th className="py-3 px-3 text-right w-20">AZIONI</th>
+                <th className="py-3 px-2.5 w-24">DATA DOC.</th>
+                <th className="py-3 px-2.5 w-28">N° DOC.</th>
+                <th className="py-3 px-3 w-48">TIPO DOC. / FORNITORE</th>
+                <th className="py-3 px-3 w-32">CLIENTE</th>
+                <th className="py-3 px-2.5 w-24">N./PROT</th>
+                <th className="py-3 px-3 text-right w-24 text-rose-300">IMPORTO (€)</th>
+                <th className="py-3 px-3.5 w-64 text-indigo-300 bg-indigo-950/20">
+                  <div className="flex items-center gap-1.5">
+                    <Lock className="h-3 w-3 text-indigo-400" />
+                    <span>NOTA INTERNA (SOLO A VIDEO)</span>
+                  </div>
+                </th>
+                <th className="py-3 px-3.5 w-44">NOTE PER IL CLIENTE</th>
+                <th className="py-3 px-3 w-64 text-center text-amber-400">ATTRIBUISCI A CANTIERE</th>
+                <th className="py-3 px-2 text-right w-16">AZIONI</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800 text-slate-300">
               {filteredSospesi.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-500">
+                  <td colSpan={11} className="py-12 text-center text-slate-500">
                     <CheckCircle2 className="h-8 w-8 text-emerald-500/60 mx-auto mb-2" />
                     <p className="font-semibold text-slate-300">Nessuna voce sospesa!</p>
                     <p className="text-xs text-slate-500 mt-0.5">
@@ -537,7 +618,8 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                 </tr>
               ) : (
                 filteredSospesi.map((s) => {
-                  const isEditing = editingId === s.id;
+                  const isEditingCustomerNote = editingId === s.id;
+                  const isEditingInternalNote = editingInternalNoteId === s.id;
                   const currentTarget = selectedTargetByItem[s.id] || cantieri[0]?.id || '';
                   const isSelected = selectedIds.includes(s.id);
 
@@ -559,52 +641,139 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                         />
                       </td>
 
-                      {/* Data */}
-                      <td className="py-3 px-3 font-mono text-slate-300 text-xs whitespace-nowrap">
+                      {/* DATA DOC. */}
+                      <td className="py-3 px-2.5 font-mono text-slate-300 text-xs whitespace-nowrap">
                         {formatDateItalian(s.date)}
                       </td>
 
-                      {/* N Doc */}
-                      <td className="py-3 px-3.5 font-semibold text-white whitespace-nowrap">
+                      {/* N° DOC. (Numero fattura) */}
+                      <td className="py-3 px-2.5 font-mono font-bold text-amber-300 whitespace-nowrap text-xs">
                         {s.docNumber}
                       </td>
 
-                      {/* Fornitore */}
-                      <td className="py-3 px-3.5 font-medium text-slate-200">
-                        {s.supplier}
+                      {/* TIPO DOC. / FORNITORE */}
+                      <td className="py-3 px-3">
+                        <div className="font-bold text-white uppercase text-xs">
+                          {s.supplier}
+                        </div>
+                        {s.ddtNumber && (
+                          <div className="text-[11px] text-amber-400/90 font-mono mt-0.5">
+                            DDT: {s.ddtNumber} {s.ddtDate ? `(${formatDateItalian(s.ddtDate)})` : ''}
+                          </div>
+                        )}
+                        <div className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">
+                          {s.description}
+                        </div>
                       </td>
 
-                      {/* Descrizione */}
-                      <td className="py-3 px-4">
-                        <div className="font-medium text-slate-100">{s.description}</div>
+                      {/* CLIENTE */}
+                      <td className="py-3 px-3 text-slate-300 text-xs font-medium">
+                        {s.client || <span className="text-slate-600">-</span>}
                       </td>
 
-                      {/* Importo */}
-                      <td className="py-3 px-3.5 text-right font-mono font-bold text-rose-300 whitespace-nowrap">
+                      {/* N./PROT (Protocollo contabile a mano) */}
+                      <td className="py-3 px-2.5 font-mono text-slate-300 text-xs font-semibold whitespace-nowrap">
+                        {s.protocol ? (
+                          <span className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-200">
+                            {s.protocol}
+                          </span>
+                        ) : (
+                          <span className="text-slate-600">-</span>
+                        )}
+                      </td>
+
+                      {/* IMPORTO (€) */}
+                      <td className="py-3 px-3 text-right font-mono font-bold text-rose-300 whitespace-nowrap text-xs">
                         {formatCurrency(s.amount)}
                       </td>
 
-                      {/* Note per committente */}
-                      <td className="py-3 px-4">
-                        {isEditing ? (
-                          <div className="flex items-center gap-1.5">
+                      {/* NOTA INTERNA (SOLO A VIDEO - Non stampata né esportata in Excel) */}
+                      <td className="py-3 px-3.5 bg-indigo-950/10">
+                        {isEditingInternalNote ? (
+                          <div className="space-y-1.5 min-w-[220px]">
+                            <div className="flex items-center justify-between text-[10px] text-indigo-300 font-bold uppercase tracking-wider">
+                              <span className="flex items-center gap-1">
+                                <Lock className="h-3 w-3 text-indigo-400" />
+                                <span>Nota interna a video</span>
+                              </span>
+                              <span className="text-[9px] text-indigo-400/80 font-normal">
+                                Non stampata
+                              </span>
+                            </div>
+                            <textarea
+                              value={editInternalNote}
+                              onChange={(e) => setEditInternalNote(e.target.value)}
+                              rows={2}
+                              className="w-full bg-slate-950 border border-indigo-400/80 rounded p-1.5 text-xs text-white focus:outline-none shadow-inner"
+                              placeholder="Cose da chiedere al cliente per risolvere il sospeso..."
+                              autoFocus
+                            />
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleSaveEditInternalNote(s)}
+                                className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                                title="Salva nota interna"
+                              >
+                                <Save className="h-3 w-3" />
+                                <span>Salva</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingInternalNoteId(null)}
+                                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs cursor-pointer transition-colors"
+                                title="Annulla"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            onClick={() => handleStartEditInternalNote(s)}
+                            className="cursor-pointer group flex items-start justify-between gap-1.5 p-1 rounded hover:bg-indigo-950/40 transition-colors"
+                            title="Clicca per inserire o modificare la nota interna (rimane solo a video)"
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1 mb-0.5">
+                                <span className="text-[9px] uppercase font-bold text-indigo-300 bg-indigo-500/20 px-1.5 py-0.2 rounded border border-indigo-500/30 flex items-center gap-1 shrink-0">
+                                  <Lock className="h-2.5 w-2.5 text-indigo-400" />
+                                  <span>Solo a video</span>
+                                </span>
+                              </div>
+                              <p className={`text-xs ${s.internalNote ? 'text-indigo-100 font-medium' : 'text-slate-500 italic'}`}>
+                                {s.internalNote || 'Scrivi cosa chiedere al cliente...'}
+                              </p>
+                            </div>
+                            <Edit2 className="h-3 w-3 text-indigo-400/60 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5" />
+                          </div>
+                        )}
+                      </td>
+
+                      {/* NOTE PER IL CLIENTE (STAMPATE SUL REPORT PDF) */}
+                      <td className="py-3 px-3.5">
+                        {isEditingCustomerNote ? (
+                          <div className="flex items-center gap-1.5 min-w-[160px]">
                             <input
                               type="text"
                               value={editNote}
                               onChange={(e) => setEditNote(e.target.value)}
-                              className="w-full bg-slate-950 border border-amber-400 rounded px-2 py-1 text-xs text-white"
+                              className="w-full bg-slate-950 border border-amber-400 rounded px-2 py-1 text-xs text-white focus:outline-none"
+                              placeholder="Nota per il cliente..."
                               autoFocus
                             />
                             <button
+                              type="button"
                               onClick={() => handleSaveEdit(s)}
-                              className="p-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded cursor-pointer"
-                              title="Salva"
+                              className="p-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded cursor-pointer shrink-0"
+                              title="Salva nota cliente"
                             >
                               <Save className="h-3.5 w-3.5" />
                             </button>
                             <button
+                              type="button"
                               onClick={() => setEditingId(null)}
-                              className="p-1 bg-slate-800 text-slate-400 rounded cursor-pointer"
+                              className="p-1 bg-slate-800 text-slate-400 rounded cursor-pointer shrink-0"
                               title="Annulla"
                             >
                               <X className="h-3.5 w-3.5" />
@@ -613,11 +782,11 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                         ) : (
                           <div
                             onClick={() => handleStartEdit(s)}
-                            className="cursor-pointer group flex items-center justify-between"
-                            title="Clicca per modificare la nota"
+                            className="cursor-pointer group flex items-center justify-between gap-1 p-1 rounded hover:bg-slate-800/60 transition-colors"
+                            title="Clicca per modificare la nota cliente (stampata nel PDF)"
                           >
-                            <span className="text-xs text-amber-300/90 group-hover:underline">
-                              {s.customerNote || 'Aggiungi nota per il cliente...'}
+                            <span className="text-xs text-amber-300/90 group-hover:underline truncate max-w-[150px]">
+                              {s.customerNote || 'Aggiungi nota cliente...'}
                             </span>
                             <Edit2 className="h-3 w-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity ml-1 shrink-0" />
                           </div>
@@ -625,7 +794,7 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                       </td>
 
                       {/* 1-Click Move to Cantiere */}
-                      <td className="py-3 px-4">
+                      <td className="py-3 px-3">
                         <div className="flex items-center gap-1.5">
                           <select
                             value={currentTarget}
@@ -635,7 +804,7 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                                 [s.id]: e.target.value,
                               });
                             }}
-                            className="flex-1 bg-slate-950 border border-slate-700 text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:border-amber-400"
+                            className="flex-1 bg-slate-950 border border-slate-700 text-white text-xs rounded px-2 py-1.5 focus:outline-none focus:border-amber-400 max-w-[180px]"
                           >
                             {cantieri.map((c) => (
                               <option key={c.id} value={c.id}>
@@ -645,6 +814,7 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                           </select>
 
                           <button
+                            type="button"
                             onClick={() => handleExecuteAssign(s.id)}
                             className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 shadow-sm"
                             title="Sposta definitivamente questo movimento nella Scheda Cantiere"
@@ -656,7 +826,7 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                       </td>
 
                       {/* Azioni: Bottone Cancella Singola Voce */}
-                      <td className="py-3 px-3 text-right whitespace-nowrap">
+                      <td className="py-3 px-2 text-right whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => setSospesoToDelete(s)}

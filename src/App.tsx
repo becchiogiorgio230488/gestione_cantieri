@@ -31,6 +31,10 @@ import {
   extractSupplierFromMovement,
   cleanInvoiceNum,
   isSameSupplier,
+  formatSingleDdtTag,
+  extractDdtEntriesFromTypeAndSubject,
+  buildFormattedTypeAndSubject,
+  mergeTypeAndSubject,
 } from './utils/invoiceDuplicateHelper';
 import { isSupabaseConfigured } from './lib/supabase';
 import {
@@ -110,8 +114,8 @@ export default function App() {
       // Subscribe to realtime database changes across tabs / devices
       let debounceTimer: any = null;
       const unsubscribe = subscribeToRealtimeChanges(() => {
-        // Skip remote refetch triggered by local mutations within 3.5 seconds
-        if (Date.now() - lastLocalSaveRef.current < 3500) {
+        // Skip remote refetch triggered by local mutations within 12 seconds
+        if (Date.now() - lastLocalSaveRef.current < 12000) {
           return;
         }
         clearTimeout(debounceTimer);
@@ -576,14 +580,16 @@ export default function App() {
   const handleMoveMovementToSospesi = (cantiereId: string, movement: Movement) => {
     if (!currentArtigiano) return;
 
+    const sourceC = currentArtigiano.cantieri?.find((c) => c.id === cantiereId);
     const newSospeso: SospesoItem = {
       id: `sosp-${Date.now()}`,
       date: movement.date,
       docNumber: movement.docNumber,
-      supplier: extractSupplierFromMovement(movement) || currentArtigiano.name,
+      supplier: (extractSupplierFromMovement(movement) || currentArtigiano.name).toUpperCase(),
       description: movement.typeAndSubject,
       amount: movement.purchases || movement.issued || 0,
       protocol: movement.protocol || undefined,
+      client: sourceC?.client || undefined,
       status: 'in_attesa_cliente',
       customerNote: 'Spostato da cantiere in attesa di chiarimento col committente',
       createdAt: new Date().toISOString(),
@@ -618,105 +624,359 @@ export default function App() {
     );
   };
 
-  // Move an existing movement from one cantiere to another
+  // Move an existing movement from one cantiere to another with INVOICE ACCORPAMENTO
   const handleMoveMovementToOtherCantiere = (
     sourceCantiereId: string,
     targetCantiereId: string,
     movement: Movement
   ) => {
     if (!currentArtigiano) return;
-    const targetC = currentArtigiano.cantieri?.find((c) => c.id === targetCantiereId);
-    if (!targetC) return;
+    let notificationMsg = '';
 
-    updateCurrentArtigiano((art) => ({
-      ...art,
-      cantieri: art.cantieri.map((c) => {
-        if (c.id === sourceCantiereId) {
-          return {
-            ...c,
-            movements: c.movements.filter((m) => m.id !== movement.id),
-            updatedAt: new Date().toISOString(),
-          };
-        }
-        if (c.id === targetCantiereId) {
-          return {
-            ...c,
-            movements: [...c.movements, movement],
-            updatedAt: new Date().toISOString(),
-          };
-        }
-        return c;
-      }),
-      updatedAt: new Date().toISOString(),
-    }));
+    updateCurrentArtigiano((art) => {
+      const sourceC = art.cantieri?.find((c) => c.id === sourceCantiereId);
+      const targetC = art.cantieri?.find((c) => c.id === targetCantiereId);
+      if (!sourceC || !targetC) return art;
+
+      const normDoc = cleanInvoiceNum(movement.docNumber);
+      const movAmount = Math.round((movement.purchases || movement.issued || 0) * 100) / 100;
+      const supplier = extractSupplierFromMovement(movement) || art.name;
+
+      // Extract existing DDT tags from moving movement
+      const incomingDdtTags = extractDdtEntriesFromTypeAndSubject(movement.typeAndSubject, movement.date);
+
+      // Check if this invoice is ALREADY present in target cantiere
+      const existingMovIndex = targetC.movements.findIndex(
+        (m) =>
+          (m.purchases || 0) > 0 &&
+          (
+            cleanInvoiceNum(m.docNumber) === normDoc ||
+            (m.xmlRef?.invoiceNum && cleanInvoiceNum(m.xmlRef.invoiceNum) === normDoc)
+          )
+      );
+
+      let nextTargetMovements: Movement[];
+
+      if (existingMovIndex !== -1) {
+        // ACCORPARE into the single existing movement row in destination cantiere!
+        const existing = targetC.movements[existingMovIndex];
+        const newPurchases = Math.round(((existing.purchases || 0) + movAmount) * 100) / 100;
+
+        // Strictly format Tipo Doc. / Fornitore as: "FORNITORE (DDT N. ... DEL ...)" and NIENT'ALTRO
+        const updatedTypeAndSubject = mergeTypeAndSubject(
+          existing.typeAndSubject,
+          incomingDdtTags,
+          supplier,
+          movement.date
+        );
+
+        const noteAddition = `Accorpato da cantiere "${sourceC.name}" (€ ${movAmount.toFixed(2)})`;
+        const updatedNotes = existing.notes ? `${existing.notes} | ${noteAddition}` : noteAddition;
+
+        const mergedMovement: Movement = {
+          ...existing,
+          date: movement.date && movement.date > existing.date ? movement.date : existing.date,
+          purchases: newPurchases,
+          typeAndSubject: updatedTypeAndSubject,
+          notes: updatedNotes,
+          protocol: existing.protocol || movement.protocol || '',
+        };
+
+        nextTargetMovements = targetC.movements.map((m, idx) =>
+          idx === existingMovIndex ? mergedMovement : m
+        );
+
+        notificationMsg = `Fattura "${movement.docNumber}" accorpata alla riga già presente nel cantiere "${targetC.name}" (Nuovo totale fattura: € ${newPurchases.toFixed(2)})!`;
+      } else {
+        // Format the new movement's typeAndSubject strictly as FORNITORE (DDT N. ... DEL ...) and NIENT'ALTRO
+        const formattedTypeAndSubject = incomingDdtTags.length > 0
+          ? buildFormattedTypeAndSubject(supplier, incomingDdtTags)
+          : (movement.typeAndSubject || supplier);
+
+        const newMovement: Movement = {
+          ...movement,
+          typeAndSubject: formattedTypeAndSubject,
+        };
+
+        nextTargetMovements = [...targetC.movements, newMovement];
+        notificationMsg = `Fattura / DDT "${movement.docNumber}" (€ ${movAmount.toFixed(2)}) spostata con successo nel cantiere "${targetC.name}"!`;
+      }
+
+      return {
+        ...art,
+        cantieri: art.cantieri.map((c) => {
+          if (c.id === sourceCantiereId) {
+            return {
+              ...c,
+              movements: c.movements.filter((m) => m.id !== movement.id),
+              updatedAt: new Date().toISOString(),
+            };
+          }
+          if (c.id === targetCantiereId) {
+            return {
+              ...c,
+              movements: nextTargetMovements,
+              updatedAt: new Date().toISOString(),
+            };
+          }
+          return c;
+        }),
+        updatedAt: new Date().toISOString(),
+      };
+    });
 
     if (isSupabaseConfigured()) {
       deleteMovementFromSupabase(movement.id).catch(console.error);
-      upsertMovementToSupabase(targetCantiereId, movement).catch(console.error);
     }
 
-    showNotification(
-      `DDT / Voce "${movement.docNumber}" spostata con successo nel cantiere "${targetC.name}"!`
-    );
+    if (notificationMsg) {
+      showNotification(notificationMsg);
+    }
   };
 
-  // Sospesi operations: 1-click move to cantiere
+  // Sospesi operations: 1-click move to cantiere with INVOICE ACCORPAMENTO and STRICT DDT FORMATTING
   const handleAssignSospesoToCantiere = (
     sospesoId: string,
     targetCantiereId: string
   ) => {
-    if (!currentArtigiano) return;
+    let notificationMsg = '';
 
-    const sosp = currentArtigiano.sospesi?.find((s) => s.id === sospesoId);
-    if (!sosp) return;
+    updateCurrentArtigiano((art) => {
+      const sosp = (art.sospesi || []).find((s) => s.id === sospesoId);
+      if (!sosp) return art;
 
-    const targetC = currentArtigiano.cantieri?.find((c) => c.id === targetCantiereId);
-    if (!targetC) {
-      showNotification('Cantiere di destinazione non trovato.');
-      return;
-    }
+      const targetCIndex = art.cantieri.findIndex((c) => c.id === targetCantiereId);
+      if (targetCIndex === -1) {
+        notificationMsg = 'Cantiere di destinazione non trovato.';
+        return art;
+      }
 
-    const newMovement: Movement = {
-      id: `mov-sosp-${Date.now()}`,
-      date: sosp.date,
-      docNumber: sosp.docNumber,
-      typeAndSubject: `${sosp.supplier} - ${sosp.description}${
-        sosp.customerNote ? ` (Nota: ${sosp.customerNote})` : ''
-      }`,
-      protocol: sosp.protocol || `DA-SOSP-${sosp.docNumber.slice(0, 8)}`,
-      purchases: Number(sosp.amount) || 0,
-      issued: 0,
-      source: 'xml',
-      notes: `Assegnato da Scheda Sospesi dopo conferma committente`,
-    };
+      const targetC = art.cantieri[targetCIndex];
+      const normDoc = cleanInvoiceNum(sosp.docNumber);
+      const addAmount = Math.round((Number(sosp.amount) || 0) * 100) / 100;
+      const supplier = (sosp.supplier || art.name).toUpperCase().trim();
 
-    updateCurrentArtigiano((art) => ({
-      ...art,
-      cantieri: art.cantieri.map((c) =>
-        c.id === targetCantiereId
+      // Format the incoming DDT strictly as "DDT N. <numero> DEL <data in DD/MM/YYYY>"
+      const ddtTag = formatSingleDdtTag(sosp.ddtNumber || sosp.description, sosp.ddtDate || sosp.date);
+
+      // Check if this invoice is ALREADY present in target cantiere
+      const existingMovIndex = targetC.movements.findIndex(
+        (m) =>
+          (m.purchases || 0) > 0 &&
+          (
+            cleanInvoiceNum(m.docNumber) === normDoc ||
+            (m.xmlRef?.invoiceNum && cleanInvoiceNum(m.xmlRef.invoiceNum) === normDoc)
+          )
+      );
+
+      let nextMovements: Movement[];
+
+      if (existingMovIndex !== -1) {
+        // ACCORPARE into existing movement of the same invoice!
+        const existing = targetC.movements[existingMovIndex];
+        const newPurchases = Math.round(((existing.purchases || 0) + addAmount) * 100) / 100;
+
+        // Strictly format Tipo Doc. / Fornitore as: "FORNITORE (DDT N. ... DEL ..., ...)" and NIENT'ALTRO
+        const updatedTypeAndSubject = mergeTypeAndSubject(
+          existing.typeAndSubject,
+          ddtTag ? [ddtTag] : [],
+          supplier,
+          sosp.date
+        );
+
+        const noteAddition = `Accorpato ${ddtTag || 'DDT'} (€ ${addAmount.toFixed(2)})${sosp.customerNote ? ` [Nota: ${sosp.customerNote}]` : ''}`;
+        const updatedNotes = existing.notes ? `${existing.notes} | ${noteAddition}` : noteAddition;
+
+        const mergedMovement: Movement = {
+          ...existing,
+          date: sosp.date && sosp.date > existing.date ? sosp.date : existing.date,
+          purchases: newPurchases,
+          typeAndSubject: updatedTypeAndSubject,
+          notes: updatedNotes,
+          protocol: existing.protocol || sosp.protocol || '',
+        };
+
+        nextMovements = targetC.movements.map((m, idx) =>
+          idx === existingMovIndex ? mergedMovement : m
+        );
+
+        notificationMsg = `DDT "${ddtTag || sosp.docNumber}" (€ ${addAmount.toFixed(2)}) accorpato alla fattura "${existing.docNumber}" nel cantiere "${targetC.name}" (Nuovo totale: € ${newPurchases.toFixed(2)})!`;
+      } else {
+        // Strictly format Tipo Doc. / Fornitore as: "FORNITORE (DDT N. ... DEL ...)" and NIENT'ALTRO
+        const formattedTypeAndSubject = buildFormattedTypeAndSubject(
+          supplier,
+          ddtTag ? [ddtTag] : []
+        );
+
+        const newMovement: Movement = {
+          id: `mov-sosp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          date: sosp.date,
+          docNumber: sosp.docNumber, // Only invoice number as requested
+          typeAndSubject: formattedTypeAndSubject,
+          protocol: sosp.protocol || '',
+          purchases: addAmount,
+          issued: 0,
+          source: 'xml',
+          notes: sosp.customerNote ? `Nota: ${sosp.customerNote}` : 'Spostato da Scheda Sospesi',
+          xmlRef: {
+            supplier: supplier,
+            invoiceNum: sosp.docNumber,
+          },
+        };
+
+        nextMovements = [...targetC.movements, newMovement];
+        notificationMsg = `DDT "${ddtTag || sosp.docNumber}" (€ ${addAmount.toFixed(2)}) spostato con successo nel cantiere "${targetC.name}"!`;
+      }
+
+      const nextCantieri = art.cantieri.map((c, idx) =>
+        idx === targetCIndex
           ? {
               ...c,
-              movements: [...c.movements, newMovement],
+              movements: nextMovements,
               updatedAt: new Date().toISOString(),
             }
           : c
-      ),
-      sospesi: (art.sospesi || []).filter((s) => s.id !== sospesoId),
-      updatedAt: new Date().toISOString(),
-    }));
+      );
 
-    // Immediately remove from Supabase sospesi table so it doesn't reappear
+      // Remove ONLY this specific sospeso item
+      const nextSospesi = (art.sospesi || []).filter((s) => s.id !== sospesoId);
+
+      return {
+        ...art,
+        cantieri: nextCantieri,
+        sospesi: nextSospesi,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
     if (isSupabaseConfigured()) {
       deleteSospesoFromSupabase(sospesoId).catch((err) =>
         console.error('Error removing assigned sospeso from Supabase:', err)
       );
-      upsertMovementToSupabase(targetCantiereId, newMovement).catch((err) =>
-        console.error('Error adding moved movement to Supabase:', err)
+    }
+
+    if (notificationMsg) {
+      showNotification(notificationMsg);
+    }
+  };
+
+  // Bulk move multiple sospesi to cantiere with invoice accorpamento and strict formatting
+  const handleAssignMultipleSospesiToCantiere = (
+    sospesiIds: string[],
+    targetCantiereId: string
+  ) => {
+    if (sospesiIds.length === 0) return;
+    const targetSet = new Set(sospesiIds);
+    let movedCount = 0;
+    let accorpateCount = 0;
+    let totalMovedAmount = 0;
+    let targetCantiereName = '';
+
+    updateCurrentArtigiano((art) => {
+      const targetCIndex = art.cantieri.findIndex((c) => c.id === targetCantiereId);
+      if (targetCIndex === -1) return art;
+
+      const targetC = art.cantieri[targetCIndex];
+      targetCantiereName = targetC.name;
+      let workingMovements = [...targetC.movements];
+
+      const toMoveList = (art.sospesi || []).filter((s) => targetSet.has(s.id));
+
+      for (const sosp of toMoveList) {
+        movedCount++;
+        const addAmount = Math.round((Number(sosp.amount) || 0) * 100) / 100;
+        totalMovedAmount += addAmount;
+        const normDoc = cleanInvoiceNum(sosp.docNumber);
+        const supplier = (sosp.supplier || art.name).toUpperCase().trim();
+        const ddtTag = formatSingleDdtTag(sosp.ddtNumber || sosp.description, sosp.ddtDate || sosp.date);
+
+        const existingMovIndex = workingMovements.findIndex(
+          (m) =>
+            (m.purchases || 0) > 0 &&
+            (
+              cleanInvoiceNum(m.docNumber) === normDoc ||
+              (m.xmlRef?.invoiceNum && cleanInvoiceNum(m.xmlRef.invoiceNum) === normDoc)
+            )
+        );
+
+        if (existingMovIndex !== -1) {
+          // Accorpa into existing movement of this invoice
+          accorpateCount++;
+          const existing = workingMovements[existingMovIndex];
+          const newPurchases = Math.round(((existing.purchases || 0) + addAmount) * 100) / 100;
+
+          // Strictly format Tipo Doc. / Fornitore as: "FORNITORE (DDT N. ... DEL ..., ...)" and NIENT'ALTRO
+          const updatedTypeAndSubject = mergeTypeAndSubject(
+            existing.typeAndSubject,
+            ddtTag ? [ddtTag] : [],
+            supplier,
+            sosp.date
+          );
+
+          const noteAdd = `Accorpato ${ddtTag || 'DDT'} (€ ${addAmount.toFixed(2)})${sosp.customerNote ? ` [Nota: ${sosp.customerNote}]` : ''}`;
+          const updatedNotes = existing.notes ? `${existing.notes} | ${noteAdd}` : noteAdd;
+
+          workingMovements[existingMovIndex] = {
+            ...existing,
+            date: sosp.date && sosp.date > existing.date ? sosp.date : existing.date,
+            purchases: newPurchases,
+            typeAndSubject: updatedTypeAndSubject,
+            notes: updatedNotes,
+            protocol: existing.protocol || sosp.protocol || '',
+          };
+        } else {
+          // Strictly format Tipo Doc. / Fornitore as: "FORNITORE (DDT N. ... DEL ...)" and NIENT'ALTRO
+          const formattedTypeAndSubject = buildFormattedTypeAndSubject(
+            supplier,
+            ddtTag ? [ddtTag] : []
+          );
+
+          workingMovements.push({
+            id: `mov-sosp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            date: sosp.date,
+            docNumber: sosp.docNumber,
+            typeAndSubject: formattedTypeAndSubject,
+            protocol: sosp.protocol || '',
+            purchases: addAmount,
+            issued: 0,
+            source: 'xml',
+            notes: sosp.customerNote ? `Nota: ${sosp.customerNote}` : 'Spostato da Scheda Sospesi',
+            xmlRef: {
+              supplier: supplier,
+              invoiceNum: sosp.docNumber,
+            },
+          });
+        }
+      }
+
+      const nextCantieri = art.cantieri.map((c, idx) =>
+        idx === targetCIndex
+          ? {
+              ...c,
+              movements: workingMovements,
+              updatedAt: new Date().toISOString(),
+            }
+          : c
       );
+
+      const nextSospesi = (art.sospesi || []).filter((s) => !targetSet.has(s.id));
+
+      return {
+        ...art,
+        cantieri: nextCantieri,
+        sospesi: nextSospesi,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    if (isSupabaseConfigured()) {
+      for (const id of sospesiIds) {
+        deleteSospesoFromSupabase(id).catch(console.error);
+      }
     }
 
     showNotification(
-      `Voce "${sosp.docNumber}" (€ ${sosp.amount.toFixed(2)}) spostata con successo nella scheda "${targetC.name}"!`
+      `${movedCount} voci (€ ${totalMovedAmount.toFixed(2)}) spostate nel cantiere "${targetCantiereName}"${accorpateCount > 0 ? ` (${accorpateCount} accorpate a fatture già presenti)` : ''}!`
     );
   };
 
@@ -1036,6 +1296,7 @@ export default function App() {
             artigianoName={currentArtigiano.name}
             onBack={() => setNavLevel('prospetto_cantieri')}
             onAssignToCantiere={handleAssignSospesoToCantiere}
+            onAssignMultipleToCantiere={handleAssignMultipleSospesiToCantiere}
             onUpdateSospeso={handleUpdateSospeso}
             onDeleteSospeso={handleDeleteSospeso}
             onDeleteMultipleSospesi={handleDeleteMultipleSospesi}

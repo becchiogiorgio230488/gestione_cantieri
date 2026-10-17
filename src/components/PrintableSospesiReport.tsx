@@ -76,32 +76,41 @@ export const PrintableSospesiReport: React.FC<PrintableSospesiReportProps> = ({
         <table className="w-full text-left border-collapse text-xs mb-6 border border-slate-300">
           <thead>
             <tr className="bg-slate-200 border-b border-slate-300 uppercase text-[10px] font-bold text-slate-800">
-              <th className="p-2 border-r border-slate-300 w-24">DATA</th>
-              <th className="p-2 border-r border-slate-300 w-28">N° DOC. / DDT</th>
-              <th className="p-2 border-r border-slate-300 w-36">FORNITORE</th>
-              <th className="p-2 border-r border-slate-300">DESCRIZIONE MATERIALE / FORNITURA</th>
-              <th className="p-2 border-r border-slate-300 text-right w-24">IMPORTO (€)</th>
-              <th className="p-2 w-48 text-center bg-slate-100">DESTINAZIONE CANTIERE (A CURA DEL COMMITTENTE)</th>
+              <th className="p-2 border-r border-slate-300 w-20">DATA</th>
+              <th className="p-2 border-r border-slate-300 w-20">N° DOC.</th>
+              <th className="p-2 border-r border-slate-300 w-32">TIPO DOC. / FORNITORE</th>
+              <th className="p-2 border-r border-slate-300 w-24">CLIENTE</th>
+              <th className="p-2 border-r border-slate-300 w-20">N./PROT</th>
+              <th className="p-2 border-r border-slate-300 text-right w-20">IMPORTO (€)</th>
+              <th className="p-2 border-r border-slate-300">NOTE PER IL CLIENTE</th>
+              <th className="p-2 w-44 text-center bg-slate-100">DESTINAZIONE CANTIERE (A CURA COMMITTENTE)</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 text-slate-800">
             {sospesi.map((s) => (
               <tr key={s.id}>
-                <td className="p-2 border-r border-slate-200 font-mono text-[11px]">
+                <td className="p-2 border-r border-slate-200 font-mono text-[11px] whitespace-nowrap">
                   {formatDateItalian(s.date)}
                 </td>
-                <td className="p-2 border-r border-slate-200 font-semibold">{s.docNumber}</td>
-                <td className="p-2 border-r border-slate-200 font-medium">{s.supplier}</td>
+                <td className="p-2 border-r border-slate-200 font-semibold font-mono">{s.docNumber}</td>
                 <td className="p-2 border-r border-slate-200">
-                  <span className="font-medium">{s.description}</span>
-                  {s.customerNote && (
-                    <span className="block text-[10px] text-slate-500 italic mt-0.5">
-                      Note / Quesito: {s.customerNote}
-                    </span>
+                  <div className="font-bold">{s.supplier}</div>
+                  {s.ddtNumber && (
+                    <div className="text-[10px] text-slate-600 font-mono">DDT: {s.ddtNumber}</div>
                   )}
+                  <div className="text-[10px] text-slate-500 line-clamp-1">{s.description}</div>
                 </td>
-                <td className="p-2 border-r border-slate-200 text-right font-mono font-bold">
+                <td className="p-2 border-r border-slate-200 text-slate-700">{s.client || '-'}</td>
+                <td className="p-2 border-r border-slate-200 font-mono text-slate-700">{s.protocol || '-'}</td>
+                <td className="p-2 border-r border-slate-200 text-right font-mono font-bold whitespace-nowrap">
                   {formatCurrency(s.amount)}
+                </td>
+                <td className="p-2 border-r border-slate-200">
+                  {s.customerNote ? (
+                    <span className="text-[11px] text-slate-800">{s.customerNote}</span>
+                  ) : (
+                    <span className="text-slate-400 italic text-[10px]">-</span>
+                  )}
                 </td>
                 <td className="p-2 border-slate-200 text-center bg-slate-50/50">
                   <div className="border-b border-dotted border-slate-400 h-6 mt-1" />

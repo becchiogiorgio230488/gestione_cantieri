@@ -109,10 +109,12 @@ export async function fetchAllArtigianiFromSupabase(): Promise<Artigiano[]> {
       description: row.description,
       amount: Number(row.amount) || 0,
       protocol: row.protocol || undefined,
+      client: row.client || undefined,
       ddtNumber: row.ddt_number || undefined,
       ddtDate: row.ddt_date || undefined,
       status: row.status || 'in_attesa_cliente',
       customerNote: row.customer_note || undefined,
+      internalNote: row.internal_note || undefined,
       suggestedCantiereId: row.suggested_cantiere_id || undefined,
       sourceFileName: row.source_file_name || undefined,
       createdAt: row.created_at || new Date().toISOString(),
@@ -208,8 +210,31 @@ export async function upsertArtigianoToSupabase(artigiano: Artigiano): Promise<v
       await supabase.from('sospesi').delete().in('id', toDeleteSospesi);
     }
 
-    for (const item of artigiano.sospesi || []) {
-      await upsertSospesoToSupabase(artigiano.id, item);
+    if (artigiano.sospesi && artigiano.sospesi.length > 0) {
+      const rows = artigiano.sospesi.map((item) => ({
+        id: item.id,
+        artigiano_id: artigiano.id,
+        date: item.date,
+        doc_number: item.docNumber,
+        supplier: (item.supplier || '').toUpperCase(),
+        description: item.description,
+        amount: item.amount || 0,
+        protocol: item.protocol || null,
+        ddt_number: item.ddtNumber || null,
+        ddt_date: item.ddtDate || null,
+        status: item.status || 'in_attesa_cliente',
+        customer_note: item.customerNote || null,
+        suggested_cantiere_id: item.suggestedCantiereId || null,
+        source_file_name: item.sourceFileName || null,
+        created_at: item.createdAt || new Date().toISOString(),
+      }));
+      const { error: batchErr } = await supabase.from('sospesi').upsert(rows);
+      if (batchErr) {
+        console.warn('Batch upsert sospesi error, retrying:', batchErr);
+        for (const item of artigiano.sospesi) {
+          await upsertSospesoToSupabase(artigiano.id, item);
+        }
+      }
     }
   } else {
     await supabase.from('sospesi').delete().eq('artigiano_id', artigiano.id);
@@ -361,7 +386,7 @@ export async function deleteCantiereFromSupabase(cantiereId: string): Promise<vo
 export async function upsertSospesoToSupabase(artigianoId: string, item: SospesoItem): Promise<void> {
   if (!supabase || !isSupabaseConfigured()) return;
 
-  const { error } = await supabase.from('sospesi').upsert({
+  const rowData: any = {
     id: item.id,
     artigiano_id: artigianoId,
     date: item.date,
@@ -377,10 +402,24 @@ export async function upsertSospesoToSupabase(artigianoId: string, item: Sospeso
     suggested_cantiere_id: item.suggestedCantiereId || null,
     source_file_name: item.sourceFileName || null,
     created_at: item.createdAt || new Date().toISOString(),
-  });
+  };
+
+  if (item.client) rowData.client = item.client;
+  if (item.internalNote) rowData.internal_note = item.internalNote;
+
+  const { error } = await supabase.from('sospesi').upsert(rowData);
 
   if (error) {
-    console.error('Error upserting sospeso in Supabase:', error);
+    if (rowData.client || rowData.internal_note) {
+      delete rowData.client;
+      delete rowData.internal_note;
+      const { error: retryError } = await supabase.from('sospesi').upsert(rowData);
+      if (retryError) {
+        console.error('Error upserting sospeso in Supabase:', retryError);
+      }
+    } else {
+      console.error('Error upserting sospeso in Supabase:', error);
+    }
   }
 }
 

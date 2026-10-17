@@ -40,15 +40,17 @@ export interface Cantiere {
 export interface SospesoItem {
   id: string;
   date: string;
-  docNumber: string;
-  supplier: string;
+  docNumber: string; // N° DOC. (numero fattura)
+  supplier: string; // FORNITORE (sempre in maiuscolo)
   description: string;
   amount: number;
-  protocol?: string;
+  client?: string; // CLIENTE
+  protocol?: string; // N./PROT (protocollo di registrazione contabile)
   ddtNumber?: string;
   ddtDate?: string;
   status: 'in_attesa_cliente' | 'attribuito' | 'scartato';
   customerNote?: string; // Note / domanda per il cliente
+  internalNote?: string; // NOTA INTERNA (solo a video, NON stampata né esportata in Excel)
   suggestedCantiereId?: string;
   sourceFileName?: string;
   createdAt: string;

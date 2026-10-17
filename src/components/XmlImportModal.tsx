@@ -24,6 +24,7 @@ import {
   Edit3,
   Pencil,
   Tag,
+  FileText,
 } from 'lucide-react';
 import { Cantiere, ParsedInvoiceXML, Movement, SospesoItem } from '../types';
 import { parseFatturaElettronicaXML } from '../utils/xmlParser';
@@ -32,6 +33,8 @@ import { formatCurrency, formatDateItalian } from '../utils/calculations';
 import {
   findExistingPurchaseInvoiceLocations,
   InvoiceLocation,
+  formatSingleDdtTag,
+  buildFormattedTypeAndSubject,
 } from '../utils/invoiceDuplicateHelper';
 
 interface XmlImportModalProps {
@@ -108,6 +111,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
   // User-customizable Invoice Number (so it matches what is seen in accounting)
   const [customInvoiceNumber, setCustomInvoiceNumber] = useState<string>('');
+  // User-customizable Protocol Number (entered manually by user to match accounting registration protocol)
+  const [customProtocol, setCustomProtocol] = useState<string>('');
   // User-customizable DDT Names (so each DDT can be renamed before being reported into the cantiere)
   const [customDdtNames, setCustomDdtNames] = useState<Record<string, string>>({});
 
@@ -168,6 +173,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
       setXmlContent(xmlStr);
       // Initialize editable invoice number with what came from XML
       setCustomInvoiceNumber(parsed.datiDocumento.numero);
+      setCustomProtocol('');
 
       // Initialize default allocation for each line
       const defaultCantiere = preselectedCantiereId || (cantieri[0]?.id ?? '');
@@ -503,9 +509,10 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
     const commitList: { cantiereId: string; movement: Movement }[] = [];
     const sospesiCommitList: Omit<SospesoItem, 'id' | 'createdAt'>[] = [];
-    const invoiceNum = (customInvoiceNumber && customInvoiceNumber.trim()) ? customInvoiceNumber.trim() : parsedInvoice.datiDocumento.numero;
+    const invoiceNum = (customInvoiceNumber && customInvoiceNumber.trim()) ? customInvoiceNumber.trim() : (parsedInvoice.datiDocumento.numero || '').trim();
     const invoiceDate = parsedInvoice.datiDocumento.data;
-    const supplierName = parsedInvoice.cedentePrestatore.denominazione;
+    const supplierName = (parsedInvoice.cedentePrestatore.denominazione || '').toUpperCase().trim();
+    const manualProt = (customProtocol && customProtocol.trim()) ? customProtocol.trim() : '';
 
     // Check if invoice has already been imported
     if (!bypassDuplicateCheck) {
@@ -539,20 +546,27 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
           supplier: supplierName,
           description: `Fattura intera da attribuire (${parsedInvoice.righe.length} articoli)`,
           amount: parsedInvoice.datiDocumento.importoTotale,
-          protocol: `FORN-XML-${invoiceNum}`,
+          protocol: manualProt || `FORN-XML-${invoiceNum}`,
           status: 'in_attesa_cliente',
           customerNote: 'Da verificare a quale cantiere imputare l\'intera fornitura.',
           sourceFileName: parsedInvoice.fileName,
         });
       } else {
+        const wholeDdtTags = parsedInvoice.ddtList.map((d) =>
+          formatSingleDdtTag(getDdtDisplayName(d.numeroDDT), d.dataDDT)
+        );
+        const wholeTypeAndSubject = wholeDdtTags.length > 0
+          ? buildFormattedTypeAndSubject(supplierName, wholeDdtTags)
+          : supplierName;
+
         commitList.push({
           cantiereId: wholeInvoiceCantiereId,
           movement: {
             id: `mov-xml-${Date.now()}-whole`,
             date: invoiceDate,
             docNumber: invoiceNum,
-            typeAndSubject: `${supplierName} - Fattura intera (${parsedInvoice.righe.length} articoli)`,
-            protocol: `FORN-XML-${invoiceNum}`,
+            typeAndSubject: wholeTypeAndSubject,
+            protocol: manualProt || `FORN-XML-${invoiceNum}`,
             purchases: parsedInvoice.datiDocumento.importoTotale,
             issued: 0,
             source: 'xml',
@@ -604,13 +618,13 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         if (alloc.targetCantiereId === '__sospeso__') {
           sospesiCommitList.push({
             date: ddt.dataDDT || invoiceDate,
-            docNumber: `${invoiceNum} / ${customDdtName}`,
+            docNumber: invoiceNum,
             supplier: supplierName,
             description: `${customDdtName}: ${descSummary}`,
             amount: ddtActiveTotal,
             ddtNumber: customDdtName,
             ddtDate: ddt.dataDDT,
-            protocol: customDdtName,
+            protocol: manualProt || customDdtName,
             status: 'in_attesa_cliente',
             customerNote: 'DDT in attesa di destinazione da parte del committente/capocantiere.',
             sourceFileName: parsedInvoice.fileName,
@@ -624,13 +638,13 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             if (sp.cantiereId === '__sospeso__') {
               sospesiCommitList.push({
                 date: ddt.dataDDT || invoiceDate,
-                docNumber: `${invoiceNum} / ${customDdtName}`,
+                docNumber: invoiceNum,
                 supplier: supplierName,
                 description: `${customDdtName} (quota ${sp.percentage}%): ${descSummary}`,
                 amount: splitAmount,
                 ddtNumber: customDdtName,
                 ddtDate: ddt.dataDDT,
-                protocol: customDdtName,
+                protocol: manualProt || customDdtName,
                 status: 'in_attesa_cliente',
                 customerNote: `Quota ${sp.percentage}% da definire col cliente.`,
                 sourceFileName: parsedInvoice.fileName,
@@ -678,18 +692,17 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         const roundedTotal = Math.round(group.totalPurchases * 100) / 100;
         if (roundedTotal <= 0) return;
 
-        // Format each DDT label according to requirement:
-        // "se uno o più ddt vengono importati in uno stesso cantiere quando riporti le cose nel cantiere metti una unica riga con il totale dei ddt e nella colonna tipo doc/fornitore/cliente metti il nome del fornitore con tra parentesi tonde l'elenco dei ddt inseriti in quella riga."
-        // "dammi la possibilità di modificare il nome del ddt che userai per riportarlo all'interno del cantiere."
+        // Format each DDT label strictly according to requirement: "DDT N. <numero> DEL <data in DD/MM/YYYY>"
         const ddtListLabels = group.ddtItems.map((d) => {
           const customName = getDdtDisplayName(d.numeroDDT);
-          return d.percentage ? `${customName} (${d.percentage}%)` : customName;
+          return formatSingleDdtTag(customName, d.dataDDT);
         });
 
-        const typeAndSubject = `${supplierName} (${ddtListLabels.join(', ')})`;
+        // Strictly: "FORNITORE (DDT N. ... DEL ...)" and NIENT'ALTRO
+        const typeAndSubject = buildFormattedTypeAndSubject(supplierName, ddtListLabels);
         const ddtNamesOnly = group.ddtItems.map((d) => getDdtDisplayName(d.numeroDDT)).join(', ');
-        const docNumber = `${invoiceNum} / ${ddtNamesOnly}`;
-        const protocol = group.ddtItems.length === 1 ? getDdtDisplayName(group.ddtItems[0].numeroDDT) : `DDT-VARI`;
+        const docNumber = invoiceNum; // ONLY invoice number as requested
+        const protocol = manualProt || (group.ddtItems.length === 1 ? getDdtDisplayName(group.ddtItems[0].numeroDDT) : `DDT-VARI`);
 
         const dates = group.ddtItems.map((d) => d.dataDDT).filter(Boolean) as string[];
         const movementDate = dates.length > 0 ? dates.sort().reverse()[0] : invoiceDate;
@@ -725,7 +738,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         }
 
         const lineDdtName = line.ddtNumero ? getDdtDisplayName(line.ddtNumero) : '';
-        const lineDocNumber = `${invoiceNum}${lineDdtName ? ` / ${lineDdtName}` : ''}`;
+        const lineDocNumber = invoiceNum; // ONLY invoice number as requested
 
         if (alloc.targetCantiereId === '__sospeso__') {
           sospesiCommitList.push({
@@ -736,7 +749,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             amount: line.prezzoTotale,
             ddtNumber: lineDdtName || line.ddtNumero,
             ddtDate: line.ddtData,
-            protocol: `RIGA-${line.numeroLinea}`,
+            protocol: manualProt || `RIGA-${line.numeroLinea}`,
             status: 'in_attesa_cliente',
             customerNote: 'Articolo non attribuito da chiarire con il cliente.',
             sourceFileName: parsedInvoice.fileName,
@@ -755,7 +768,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                 amount: sp.amount,
                 ddtNumber: lineDdtName || line.ddtNumero,
                 ddtDate: line.ddtData,
-                protocol: `RIGA-${line.numeroLinea}`,
+                protocol: manualProt || `RIGA-${line.numeroLinea}`,
                 status: 'in_attesa_cliente',
                 customerNote: `Quota riga ${line.numeroLinea} (${sp.percentage}%) da attribuire.`,
                 sourceFileName: parsedInvoice.fileName,
@@ -768,7 +781,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                   date: line.ddtData || invoiceDate,
                   docNumber: lineDocNumber,
                   typeAndSubject: `${supplierName} - [R${line.numeroLinea}] ${line.descrizione} (quota ${sp.percentage}%)`,
-                  protocol: `RIGA-${line.numeroLinea}`,
+                  protocol: manualProt || `RIGA-${line.numeroLinea}`,
                   purchases: sp.amount,
                   issued: 0,
                   source: 'xml',
@@ -789,7 +802,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
               date: line.ddtData || invoiceDate,
               docNumber: lineDocNumber,
               typeAndSubject: `${supplierName} - [R${line.numeroLinea}] ${line.descrizione}`,
-              protocol: `RIGA-${line.numeroLinea}`,
+              protocol: manualProt || `RIGA-${line.numeroLinea}`,
               purchases: line.prezzoTotale,
               issued: 0,
               source: 'xml',
@@ -804,10 +817,11 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
       });
     }
 
-    if (sospesiCommitList.length > 0 && onCommitSospesi) {
+    if (onCommitAllocations) {
+      onCommitAllocations(commitList, sospesiCommitList);
+    } else if (sospesiCommitList.length > 0 && onCommitSospesi) {
       onCommitSospesi(sospesiCommitList);
     }
-    onCommitAllocations(commitList, sospesiCommitList);
   };
 
   return (
@@ -930,11 +944,11 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
                 <div className="flex flex-wrap items-center gap-4">
                   {/* Editable Invoice Number Box for contabilità alignment */}
-                  <div className="bg-slate-900 border border-slate-700/80 rounded-xl p-2.5 text-left min-w-[250px] shadow-sm">
+                  <div className="bg-slate-900 border border-slate-700/80 rounded-xl p-2.5 text-left min-w-[220px] shadow-sm">
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <label htmlFor="custom-invoice-num" className="text-[11px] font-bold text-amber-400 flex items-center gap-1">
                         <Pencil className="h-3 w-3" />
-                        <span>N° Fattura (Contabilità):</span>
+                        <span>N° Doc. (Fattura):</span>
                       </label>
                       {customInvoiceNumber !== parsedInvoice.datiDocumento.numero && (
                         <button
@@ -953,21 +967,49 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                         type="text"
                         value={customInvoiceNumber}
                         onChange={(e) => setCustomInvoiceNumber(e.target.value)}
-                        className="bg-slate-950 border border-slate-700 focus:border-amber-400 rounded px-2.5 py-1 text-xs font-bold font-mono text-white w-36 focus:outline-none shadow-inner"
+                        className="bg-slate-950 border border-slate-700 focus:border-amber-400 rounded px-2.5 py-1 text-xs font-bold font-mono text-white w-32 focus:outline-none shadow-inner"
                         placeholder={parsedInvoice.datiDocumento.numero}
-                        title="Modifica il numero fattura per scrivere nel cantiere la stessa cosa che vedi in contabilità"
+                        title="Numero fattura riportato nella colonna N° Doc."
                       />
-                      <span className="text-xs text-slate-400 font-medium whitespace-nowrap font-mono">
+                      <span className="text-[11px] text-slate-400 font-medium whitespace-nowrap font-mono">
                         del {formatDateItalian(parsedInvoice.datiDocumento.data)}
                       </span>
                     </div>
                     <span className="text-[10px] text-slate-400 block mt-1">
-                      {customInvoiceNumber.trim() !== parsedInvoice.datiDocumento.numero ? (
+                      Riportato nella colonna <strong className="text-white">N° Doc.</strong> del cantiere o dei sospesi
+                    </span>
+                  </div>
+
+                  {/* Manual Protocol Number Box (N./PROT) from Accounting */}
+                  <div className="bg-slate-900 border-2 border-indigo-500/50 rounded-xl p-2.5 text-left min-w-[220px] shadow-sm bg-gradient-to-br from-slate-900 to-indigo-950/30">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label htmlFor="custom-protocol-num" className="text-[11px] font-bold text-indigo-300 flex items-center gap-1">
+                        <FileText className="h-3 w-3 text-indigo-400" />
+                        <span>N./PROT (Protocollo Contabile):</span>
+                      </label>
+                      <span className="text-[9px] font-black uppercase px-1.5 py-0.2 bg-indigo-500/20 text-indigo-300 rounded border border-indigo-500/30">
+                        A mano
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        id="custom-protocol-num"
+                        type="text"
+                        value={customProtocol}
+                        onChange={(e) => setCustomProtocol(e.target.value)}
+                        className="bg-slate-950 border border-indigo-500/60 focus:border-indigo-400 rounded px-2.5 py-1 text-xs font-bold font-mono text-indigo-100 w-full focus:outline-none shadow-inner"
+                        placeholder="Es. 142 o PROT-26/01"
+                        title="Inserisci a mano il numero di protocollo di registrazione preso dalla contabilità"
+                        autoFocus
+                      />
+                    </div>
+                    <span className="text-[10px] text-slate-400 block mt-1">
+                      {customProtocol.trim() ? (
                         <span className="text-emerald-300 font-semibold">
-                          ✓ Riportata nel cantiere come: <strong className="font-mono text-white">{customInvoiceNumber.trim() || parsedInvoice.datiDocumento.numero}</strong>
+                          ✓ Protocollo assegnato: <strong className="font-mono text-white">{customProtocol.trim()}</strong>
                         </span>
                       ) : (
-                        <span>Modifica se registrata con prefisso o dicitura diversa</span>
+                        <span>Protocollo di contabilità da inserire nella colonna <strong className="text-white">N./PROT</strong></span>
                       )}
                     </span>
                   </div>

@@ -109,3 +109,7 @@ CREATE POLICY "Permetti accesso completo anon movements" ON public.movements
 
 CREATE POLICY "Permetti accesso completo anon sospesi" ON public.sospesi
     FOR ALL USING (true) WITH CHECK (true);
+
+-- COLONNE AGGIUNTIVE SCHEDA SOSPESI (CLIENTE E NOTA INTERNA)
+ALTER TABLE public.sospesi ADD COLUMN IF NOT EXISTS client TEXT;
+ALTER TABLE public.sospesi ADD COLUMN IF NOT EXISTS internal_note TEXT;
