@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { ArtigianiHomeView } from './components/ArtigianiHomeView';
 import { ProspettoGeneraleView } from './components/ProspettoGeneraleView';
@@ -40,6 +40,8 @@ import {
   deleteCantiereFromSupabase,
   deleteMovementFromSupabase,
   deleteSospesoFromSupabase,
+  upsertMovementToSupabase,
+  upsertSospesoToSupabase,
   subscribeToRealtimeChanges,
   migrateAllLocalDataToSupabase,
 } from './services/supabaseService';
@@ -71,6 +73,7 @@ export default function App() {
 
   // Notification Toast
   const [notification, setNotification] = useState<string | null>(null);
+  const lastLocalSaveRef = useRef<number>(0);
 
   useEffect(() => {
     // 1. Initial load from local storage cache for instant rendering
@@ -105,19 +108,28 @@ export default function App() {
         });
 
       // Subscribe to realtime database changes across tabs / devices
+      let debounceTimer: any = null;
       const unsubscribe = subscribeToRealtimeChanges(() => {
-        fetchAllArtigianiFromSupabase()
-          .then((fresh) => {
-            if (fresh && fresh.length > 0) {
-              setArtigiani(fresh);
-              saveArtigiani(fresh);
-            }
-          })
-          .catch((err) => console.error('Realtime sync error:', err));
+        // Skip remote refetch triggered by local mutations within 3.5 seconds
+        if (Date.now() - lastLocalSaveRef.current < 3500) {
+          return;
+        }
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          fetchAllArtigianiFromSupabase()
+            .then((fresh) => {
+              if (fresh && fresh.length > 0) {
+                setArtigiani(fresh);
+                saveArtigiani(fresh);
+              }
+            })
+            .catch((err) => console.error('Realtime sync error:', err));
+        }, 800);
       });
 
       return () => {
         unsubscribe();
+        if (debounceTimer) clearTimeout(debounceTimer);
       };
     }
   }, []);
@@ -138,24 +150,31 @@ export default function App() {
 
   // Helper to persist artisan updates
   const updateArtigianiList = (nextList: Artigiano[]) => {
+    lastLocalSaveRef.current = Date.now();
     setArtigiani(nextList);
     saveArtigiani(nextList);
   };
 
   const updateCurrentArtigiano = (updater: (prev: Artigiano) => Artigiano) => {
-    if (!currentArtigiano) return;
-    const updated = updater(currentArtigiano);
-    const nextList = artigiani.map((a) =>
-      a.id === currentArtigiano.id ? updated : a
-    );
-    updateArtigianiList(nextList);
-
-    // Realtime auto-save to Supabase
-    if (isSupabaseConfigured()) {
-      upsertArtigianoToSupabase(updated).catch((err) =>
-        console.error('Supabase auto-save error for artigiano:', err)
+    lastLocalSaveRef.current = Date.now();
+    setArtigiani((prevArtigiani) => {
+      const activeId = selectedArtigianoId || prevArtigiani[0]?.id;
+      const target = prevArtigiani.find((a) => a.id === activeId) || prevArtigiani[0];
+      if (!target) return prevArtigiani;
+      const updated = updater(target);
+      const nextList = prevArtigiani.map((a) =>
+        a.id === target.id ? updated : a
       );
-    }
+      saveArtigiani(nextList);
+
+      // Realtime auto-save to Supabase
+      if (isSupabaseConfigured()) {
+        upsertArtigianoToSupabase(updated).catch((err) =>
+          console.error('Supabase auto-save error for artigiano:', err)
+        );
+      }
+      return nextList;
+    });
   };
 
   // Level 1 -> Level 2: Select artisan
@@ -180,17 +199,26 @@ export default function App() {
   const handleSaveArtigianoModal = (data: Partial<Artigiano>) => {
     if (artigianoToEdit) {
       // Edit
+      let updatedArtigiano: Artigiano | null = null;
       const nextList = artigiani.map((a) => {
         if (a.id === artigianoToEdit.id) {
-          return {
+          updatedArtigiano = {
             ...a,
             ...data,
             updatedAt: new Date().toISOString(),
           } as Artigiano;
+          return updatedArtigiano;
         }
         return a;
       });
       updateArtigianiList(nextList);
+
+      // Auto-save to Supabase immediately so modifications persist
+      if (updatedArtigiano && isSupabaseConfigured()) {
+        upsertArtigianoToSupabase(updatedArtigiano).catch((err) =>
+          console.error('Supabase auto-save error for updated artigiano:', err)
+        );
+      }
       showNotification(`Anagrafica artigiano "${data.name}" aggiornata.`);
     } else {
       // Create new
@@ -218,6 +246,11 @@ export default function App() {
       };
       const nextList = [newArt, ...artigiani];
       updateArtigianiList(nextList);
+      if (isSupabaseConfigured()) {
+        upsertArtigianoToSupabase(newArt).catch((err) =>
+          console.error('Supabase auto-save error for new artigiano:', err)
+        );
+      }
       setSelectedArtigianoId(newArt.id);
       setSelectedCantiereId(null);
       setNavLevel('prospetto_cantieri');
@@ -295,6 +328,30 @@ export default function App() {
     showNotification('Scheda cantiere eliminata con successo.');
   };
 
+  // Delete a single movement / DDT from a cantiere
+  const handleDeleteMovement = (cantiereId: string, movementId: string) => {
+    updateCurrentArtigiano((art) => ({
+      ...art,
+      cantieri: art.cantieri.map((c) =>
+        c.id === cantiereId
+          ? {
+              ...c,
+              movements: c.movements.filter((m) => m.id !== movementId),
+              updatedAt: new Date().toISOString(),
+            }
+          : c
+      ),
+      updatedAt: new Date().toISOString(),
+    }));
+
+    if (isSupabaseConfigured()) {
+      deleteMovementFromSupabase(movementId).catch((err) =>
+        console.error('Error deleting movement from Supabase:', err)
+      );
+    }
+    showNotification('Riga / DDT eliminato con successo dal cantiere.');
+  };
+
   const handleDeleteMovementFromAllCantieri = (
     cantiereId: string,
     movement: Movement,
@@ -306,6 +363,28 @@ export default function App() {
     const invNum = extractInvoiceNumberFromMovement(movement);
     const supp = extractSupplierFromMovement(movement);
     const isIssued = movement.issued !== 0 || movement.source === 'fattura_emessa' || movement.typeAndSubject.includes('EMESS');
+
+    const movementIdsToDelete: string[] = [movement.id];
+
+    // Find linked movements in other cantieri to delete
+    for (const c of currentArtigiano.cantieri || []) {
+      if (linkedCantiereIds.includes(c.id)) {
+        for (const m of c.movements || []) {
+          if (m.id === movement.id) continue;
+          if (isIssued) {
+            if (cleanInvoiceNum(m.docNumber) === invNum) {
+              movementIdsToDelete.push(m.id);
+            }
+          } else {
+            const mInv = extractInvoiceNumberFromMovement(m);
+            const mSupp = extractSupplierFromMovement(m);
+            if (mInv === invNum && isSameSupplier(supp, mSupp)) {
+              movementIdsToDelete.push(m.id);
+            }
+          }
+        }
+      }
+    }
 
     updateCurrentArtigiano((art) => {
       const nextCantieri = art.cantieri.map((c) => {
@@ -321,19 +400,7 @@ export default function App() {
         if (linkedCantiereIds.includes(c.id)) {
           return {
             ...c,
-            movements: c.movements.filter((m) => {
-              if (m.id === movement.id) return false;
-              if (isIssued) {
-                return cleanInvoiceNum(m.docNumber) !== invNum;
-              } else {
-                const mInv = extractInvoiceNumberFromMovement(m);
-                const mSupp = extractSupplierFromMovement(m);
-                if (mInv === invNum && isSameSupplier(supp, mSupp)) {
-                  return false;
-                }
-              }
-              return true;
-            }),
+            movements: c.movements.filter((m) => !movementIdsToDelete.includes(m.id)),
             updatedAt: new Date().toISOString(),
           };
         }
@@ -349,6 +416,15 @@ export default function App() {
         updatedAt: new Date().toISOString(),
       };
     });
+
+    if (isSupabaseConfigured()) {
+      for (const mId of movementIdsToDelete) {
+        deleteMovementFromSupabase(mId).catch(console.error);
+      }
+      for (const sId of linkedSospesiIds) {
+        deleteSospesoFromSupabase(sId).catch(console.error);
+      }
+    }
 
     const totalCantieriAffected = linkedCantiereIds.length + 1;
     showNotification(
@@ -411,13 +487,24 @@ export default function App() {
     setCantiereToEdit(null);
   };
 
-  // XML Import allocations
+  // XML Import allocations (Handles both cantiere movements and/or sospesi in one atomic operation)
   const handleCommitXmlAllocations = (
-    movementsByCantiere: { cantiereId: string; movement: Movement }[]
+    movementsByCantiere: { cantiereId: string; movement: Movement }[],
+    sospesiItems: Omit<SospesoItem, 'id' | 'createdAt'>[] = []
   ) => {
-    if (!currentArtigiano || movementsByCantiere.length === 0) return;
+    if (!currentArtigiano) return;
+    if (movementsByCantiere.length === 0 && sospesiItems.length === 0) {
+      setIsXmlModalOpen(false);
+      return;
+    }
 
     let totalAssigned = 0;
+    const newSospesi: SospesoItem[] = sospesiItems.map((it, idx) => ({
+      ...it,
+      id: `sosp-${Date.now()}-${idx}`,
+      createdAt: new Date().toISOString(),
+    }));
+
     updateCurrentArtigiano((art) => {
       const nextCantieri = [...art.cantieri];
       movementsByCantiere.forEach(({ cantiereId, movement }) => {
@@ -434,23 +521,35 @@ export default function App() {
       return {
         ...art,
         cantieri: nextCantieri,
+        sospesi: [...newSospesi, ...(art.sospesi || [])],
         updatedAt: new Date().toISOString(),
       };
     });
 
     setIsXmlModalOpen(false);
-    showNotification(
-      `Fattura XML registrata: ${movementsByCantiere.length} movimenti imputati ai cantieri di ${currentArtigiano.name} (Tot: € ${totalAssigned.toFixed(2)}).`
-    );
 
-    const uniqueIds = Array.from(new Set(movementsByCantiere.map((m) => m.cantiereId)));
-    if (uniqueIds.length === 1) {
-      setSelectedCantiereId(uniqueIds[0]);
-      setNavLevel('scheda_cantiere');
+    if (movementsByCantiere.length > 0 && newSospesi.length > 0) {
+      showNotification(
+        `Fattura XML registrata: ${movementsByCantiere.length} movimenti nei cantieri (€ ${totalAssigned.toFixed(2)}) e ${newSospesi.length} voci/DDT inviati alla "Scheda Sospesi"!`
+      );
+    } else if (newSospesi.length > 0) {
+      showNotification(
+        `${newSospesi.length} voci/DDT inviati con successo alla "Scheda Sospesi" di ${currentArtigiano.name}.`
+      );
+      setNavLevel('scheda_sospesi');
+    } else {
+      showNotification(
+        `Fattura XML registrata: ${movementsByCantiere.length} movimenti imputati ai cantieri di ${currentArtigiano.name} (Tot: € ${totalAssigned.toFixed(2)}).`
+      );
+      const uniqueIds = Array.from(new Set(movementsByCantiere.map((m) => m.cantiereId)));
+      if (uniqueIds.length === 1) {
+        setSelectedCantiereId(uniqueIds[0]);
+        setNavLevel('scheda_cantiere');
+      }
     }
   };
 
-  // XML Import Sospesi
+  // XML Import Sospesi fallback
   const handleCommitSospesiFromXml = (
     items: Omit<SospesoItem, 'id' | 'createdAt'>[]
   ) => {
@@ -470,6 +569,94 @@ export default function App() {
 
     showNotification(
       `${newSospesi.length} voci/DDT non assegnate archiviate nella "Scheda Sospesi" di ${currentArtigiano.name}.`
+    );
+  };
+
+  // Move an existing movement from a cantiere back to Scheda Sospesi
+  const handleMoveMovementToSospesi = (cantiereId: string, movement: Movement) => {
+    if (!currentArtigiano) return;
+
+    const newSospeso: SospesoItem = {
+      id: `sosp-${Date.now()}`,
+      date: movement.date,
+      docNumber: movement.docNumber,
+      supplier: extractSupplierFromMovement(movement) || currentArtigiano.name,
+      description: movement.typeAndSubject,
+      amount: movement.purchases || movement.issued || 0,
+      protocol: movement.protocol || undefined,
+      status: 'in_attesa_cliente',
+      customerNote: 'Spostato da cantiere in attesa di chiarimento col committente',
+      createdAt: new Date().toISOString(),
+    };
+
+    updateCurrentArtigiano((art) => ({
+      ...art,
+      cantieri: art.cantieri.map((c) =>
+        c.id === cantiereId
+          ? {
+              ...c,
+              movements: c.movements.filter((m) => m.id !== movement.id),
+              updatedAt: new Date().toISOString(),
+            }
+          : c
+      ),
+      sospesi: [newSospeso, ...(art.sospesi || [])],
+      updatedAt: new Date().toISOString(),
+    }));
+
+    if (isSupabaseConfigured()) {
+      deleteMovementFromSupabase(movement.id).catch((err) =>
+        console.error('Error removing movement from Supabase:', err)
+      );
+      upsertSospesoToSupabase(currentArtigiano.id, newSospeso).catch((err) =>
+        console.error('Error upserting new sospeso to Supabase:', err)
+      );
+    }
+
+    showNotification(
+      `DDT / Voce "${movement.docNumber}" spostata con successo nella "Scheda Sospesi"!`
+    );
+  };
+
+  // Move an existing movement from one cantiere to another
+  const handleMoveMovementToOtherCantiere = (
+    sourceCantiereId: string,
+    targetCantiereId: string,
+    movement: Movement
+  ) => {
+    if (!currentArtigiano) return;
+    const targetC = currentArtigiano.cantieri?.find((c) => c.id === targetCantiereId);
+    if (!targetC) return;
+
+    updateCurrentArtigiano((art) => ({
+      ...art,
+      cantieri: art.cantieri.map((c) => {
+        if (c.id === sourceCantiereId) {
+          return {
+            ...c,
+            movements: c.movements.filter((m) => m.id !== movement.id),
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        if (c.id === targetCantiereId) {
+          return {
+            ...c,
+            movements: [...c.movements, movement],
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return c;
+      }),
+      updatedAt: new Date().toISOString(),
+    }));
+
+    if (isSupabaseConfigured()) {
+      deleteMovementFromSupabase(movement.id).catch(console.error);
+      upsertMovementToSupabase(targetCantiereId, movement).catch(console.error);
+    }
+
+    showNotification(
+      `DDT / Voce "${movement.docNumber}" spostata con successo nel cantiere "${targetC.name}"!`
     );
   };
 
@@ -518,6 +705,16 @@ export default function App() {
       updatedAt: new Date().toISOString(),
     }));
 
+    // Immediately remove from Supabase sospesi table so it doesn't reappear
+    if (isSupabaseConfigured()) {
+      deleteSospesoFromSupabase(sospesoId).catch((err) =>
+        console.error('Error removing assigned sospeso from Supabase:', err)
+      );
+      upsertMovementToSupabase(targetCantiereId, newMovement).catch((err) =>
+        console.error('Error adding moved movement to Supabase:', err)
+      );
+    }
+
     showNotification(
       `Voce "${sosp.docNumber}" (€ ${sosp.amount.toFixed(2)}) spostata con successo nella scheda "${targetC.name}"!`
     );
@@ -559,11 +756,16 @@ export default function App() {
   };
 
   const handleClearAllSospesi = () => {
+    if (!currentArtigiano) return;
+    const idsToDelete = (currentArtigiano.sospesi || []).map((s) => s.id);
     updateCurrentArtigiano((art) => ({
       ...art,
       sospesi: [],
       updatedAt: new Date().toISOString(),
     }));
+    if (isSupabaseConfigured()) {
+      idsToDelete.forEach((id) => deleteSospesoFromSupabase(id).catch(console.error));
+    }
     showNotification('Tutte le voci della Scheda Sospesi sono state cancellate.');
   };
 
@@ -815,7 +1017,10 @@ export default function App() {
             onBack={() => setNavLevel('prospetto_cantieri')}
             onSelectCantiere={(id) => setSelectedCantiereId(id)}
             onUpdateCantiere={handleUpdateCantiere}
+            onDeleteMovement={handleDeleteMovement}
             onDeleteMovementFromAllCantieri={handleDeleteMovementFromAllCantieri}
+            onMoveToSospesi={(mov) => handleMoveMovementToSospesi(currentCantiere.id, mov)}
+            onMoveToOtherCantiere={(sourceId, targetId, mov) => handleMoveMovementToOtherCantiere(sourceId, targetId, mov)}
             onDeleteCantiere={handleDeleteCantiere}
             onOpenXmlImport={() => setIsXmlModalOpen(true)}
             onOpenFatturaEmessa={() => setIsFatturaEmessaModalOpen(true)}

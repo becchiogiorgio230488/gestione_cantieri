@@ -40,7 +40,8 @@ interface XmlImportModalProps {
   preselectedCantiereId?: string | null;
   onClose: () => void;
   onCommitAllocations: (
-    movementsByCantiere: { cantiereId: string; movement: Movement }[]
+    movementsByCantiere: { cantiereId: string; movement: Movement }[],
+    sospesiCommitList?: Omit<SospesoItem, 'id' | 'createdAt'>[]
   ) => void;
   onCommitSospesi?: (items: Omit<SospesoItem, 'id' | 'createdAt'>[]) => void;
   onOpenNewCantiere: () => void;
@@ -806,7 +807,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
     if (sospesiCommitList.length > 0 && onCommitSospesi) {
       onCommitSospesi(sospesiCommitList);
     }
-    onCommitAllocations(commitList);
+    onCommitAllocations(commitList, sospesiCommitList);
   };
 
   return (

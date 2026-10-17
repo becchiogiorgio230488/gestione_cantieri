@@ -21,6 +21,7 @@ import {
   CheckCircle,
   AlertTriangle,
   Layers,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { Cantiere, Movement, SospesoItem } from '../types';
 import { calculateCantiereTotals, formatCurrency, formatDateItalian, getTodayISODate } from '../utils/calculations';
@@ -36,12 +37,15 @@ interface SchedaCantiereViewProps {
   onBack: () => void;
   onSelectCantiere: (id: string) => void;
   onUpdateCantiere: (updated: Cantiere) => void;
+  onDeleteMovement?: (cantiereId: string, movementId: string) => void;
   onDeleteMovementFromAllCantieri?: (
     cantiereId: string,
     movement: Movement,
     linkedCantiereIds: string[],
     linkedSospesiIds: string[]
   ) => void;
+  onMoveToSospesi?: (movement: Movement) => void;
+  onMoveToOtherCantiere?: (sourceCantiereId: string, targetCantiereId: string, movement: Movement) => void;
   onDeleteCantiere?: (cantiereId: string) => void;
   onOpenXmlImport: () => void;
   onOpenFatturaEmessa: () => void;
@@ -56,18 +60,25 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
   onBack,
   onSelectCantiere,
   onUpdateCantiere,
+  onDeleteMovement,
   onDeleteMovementFromAllCantieri,
+  onMoveToSospesi,
+  onMoveToOtherCantiere,
   onDeleteCantiere,
   onOpenXmlImport,
   onOpenFatturaEmessa,
   onPrint,
 }) => {
   const totals = calculateCantiereTotals(cantiere);
-  const [movementToDelete, setMovementToDelete] = useState<Movement | null>(null);
-  const [linkedInvoiceToDelete, setLinkedInvoiceToDelete] = useState<{
+
+  // Modal for Movement / DDT removal: choose between 1) Sospesi, 2) Other cantiere, 3) Permanent deletion
+  const [movementActionData, setMovementActionData] = useState<{
     movement: Movement;
     linkedInfo: ReturnType<typeof findLinkedInvoiceMovementsAcrossCantieri>;
   } | null>(null);
+  const [targetMoveCantiereId, setTargetMoveCantiereId] = useState<string>('');
+  const [deleteModalStep, setDeleteModalStep] = useState<'choose_action' | 'confirm_permanent_delete'>('choose_action');
+
   const [isConfirmDeleteCantiereOpen, setIsConfirmDeleteCantiereOpen] = useState(false);
   const [newMovementError, setNewMovementError] = useState<string | null>(null);
 
@@ -223,14 +234,81 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
       sospesi
     );
 
-    if (linkedInfo.isLinkedToMultiple) {
-      setLinkedInvoiceToDelete({
-        movement: mov,
-        linkedInfo,
-      });
+    const otherCantieri = allCantieri.filter((c) => c.id !== cantiere.id);
+    if (otherCantieri.length > 0) {
+      setTargetMoveCantiereId(otherCantieri[0].id);
     } else {
-      setMovementToDelete(mov);
+      setTargetMoveCantiereId('');
     }
+
+    setDeleteModalStep('choose_action');
+    setMovementActionData({
+      movement: mov,
+      linkedInfo,
+    });
+  };
+
+  const handleConfirmMoveToSospesi = () => {
+    if (!movementActionData) return;
+    const mov = movementActionData.movement;
+    if (onMoveToSospesi) {
+      onMoveToSospesi(mov);
+    }
+    onUpdateCantiere({
+      ...cantiere,
+      movements: cantiere.movements.filter((m) => m.id !== mov.id),
+      updatedAt: new Date().toISOString(),
+    });
+    setMovementActionData(null);
+  };
+
+  const handleConfirmMoveToOtherCantiere = () => {
+    if (!movementActionData || !targetMoveCantiereId) return;
+    const mov = movementActionData.movement;
+    if (onMoveToOtherCantiere) {
+      onMoveToOtherCantiere(cantiere.id, targetMoveCantiereId, mov);
+    }
+    onUpdateCantiere({
+      ...cantiere,
+      movements: cantiere.movements.filter((m) => m.id !== mov.id),
+      updatedAt: new Date().toISOString(),
+    });
+    setMovementActionData(null);
+  };
+
+  const handleConfirmDeleteSingle = () => {
+    if (!movementActionData) return;
+    const mId = movementActionData.movement.id;
+    if (onDeleteMovement) {
+      onDeleteMovement(cantiere.id, mId);
+    }
+    onUpdateCantiere({
+      ...cantiere,
+      movements: cantiere.movements.filter((m) => m.id !== mId),
+      updatedAt: new Date().toISOString(),
+    });
+    setMovementActionData(null);
+  };
+
+  const handleConfirmDeleteAll = () => {
+    if (!movementActionData) return;
+    const mId = movementActionData.movement.id;
+    if (onDeleteMovementFromAllCantieri) {
+      const linkedCantiereIds = movementActionData.linkedInfo.otherCantieriMatches.map((m) => m.cantiereId);
+      const linkedSospesiIds = movementActionData.linkedInfo.sospesiMatches.map((s) => s.id);
+      onDeleteMovementFromAllCantieri(
+        cantiere.id,
+        movementActionData.movement,
+        linkedCantiereIds,
+        linkedSospesiIds
+      );
+    }
+    onUpdateCantiere({
+      ...cantiere,
+      movements: cantiere.movements.filter((m) => m.id !== mId),
+      updatedAt: new Date().toISOString(),
+    });
+    setMovementActionData(null);
   };
 
   const handleStartEditMovement = (mov: Movement) => {
@@ -1009,6 +1087,15 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                       {/* AZIONI */}
                       <td className="py-3 px-3 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1">
+                          {onMoveToSospesi && m.purchases !== 0 && (
+                            <button
+                              onClick={() => onMoveToSospesi(m)}
+                              className="p-1 text-slate-400 hover:text-amber-400 rounded transition-colors cursor-pointer"
+                              title="Invia questo DDT / costo alla Scheda Sospesi"
+                            >
+                              <Layers className="h-3.5 w-3.5" />
+                            </button>
+                          )}
                           <button
                             onClick={() => handleStartEditMovement(m)}
                             className="p-1 text-slate-400 hover:text-blue-400 rounded transition-colors cursor-pointer"
@@ -1135,209 +1222,277 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
         </div>
       </div>
 
-      {/* Confirmation Modal for Movement Deletion */}
-      <ConfirmModal
-        isOpen={!!movementToDelete}
-        title="Elimina Movimento Contabile"
-        message={
-          movementToDelete ? (
-            <div className="space-y-2">
-              <p>
-                Eliminare definitivamente la seguente riga dalla scheda cantiere?
-              </p>
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs font-mono space-y-1">
+      {/* MODAL GESTIONE RIMOZIONE MOVIMENTO / DDT (Sposta in Sospesi / Sposta in Cantiere / Cancella Definitivamente) */}
+      {movementActionData && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-xl w-full p-5 sm:p-6 shadow-2xl text-left space-y-4 animate-scaleIn my-8">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-2.5 rounded-xl border ${
+                  deleteModalStep === 'confirm_permanent_delete'
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                }`}>
+                  {deleteModalStep === 'confirm_permanent_delete' ? (
+                    <AlertTriangle className="h-5 w-5" />
+                  ) : (
+                    <Trash2 className="h-5 w-5" />
+                  )}
+                </div>
                 <div>
-                  <span className="text-slate-400">Data:</span> {formatDateItalian(movementToDelete.date)} •{' '}
-                  <span className="text-slate-400">Doc:</span> {movementToDelete.docNumber}
+                  <h3 className="text-base font-bold text-white">
+                    {deleteModalStep === 'confirm_permanent_delete'
+                      ? 'Conferma Eliminazione Definitiva'
+                      : 'Gestione Rimozione Movimento / DDT'}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Cantiere: <strong className="text-white">{cantiere.name}</strong>
+                  </p>
                 </div>
-                <div className="text-white font-sans font-semibold">
-                  {movementToDelete.typeAndSubject}
+              </div>
+              <button
+                type="button"
+                onClick={() => setMovementActionData(null)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Document Info Card */}
+            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-xs font-mono space-y-1.5">
+              <div className="flex items-center justify-between text-slate-400">
+                <span>Data: <strong className="text-slate-200">{formatDateItalian(movementActionData.movement.date)}</strong></span>
+                <span>Doc N°: <strong className="text-amber-300 font-bold">{movementActionData.movement.docNumber}</strong></span>
+              </div>
+              <div className="text-white font-sans font-semibold text-sm line-clamp-2">
+                {movementActionData.movement.typeAndSubject}
+              </div>
+              {movementActionData.movement.notes && (
+                <div className="text-[11px] font-sans text-slate-400 italic">
+                  {movementActionData.movement.notes}
                 </div>
-                <div className="flex items-center gap-3 pt-1">
-                  {movementToDelete.purchases !== 0 && (
-                    <span className="text-rose-400 font-bold">
-                      Costo Acquisto: {formatCurrency(movementToDelete.purchases)}
-                    </span>
-                  )}
-                  {movementToDelete.issued !== 0 && (
-                    <span className={movementToDelete.issued < 0 ? 'text-purple-400 font-bold' : 'text-blue-400 font-bold'}>
-                      {movementToDelete.issued < 0 ? 'Nota di Credito Emessa: ' : 'Fattura Emessa: '}
-                      {formatCurrency(movementToDelete.issued)}
-                    </span>
-                  )}
-                </div>
+              )}
+              <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
+                <span className="text-slate-400 font-sans">Importo:</span>
+                <span className={`font-bold font-mono text-sm ${
+                  movementActionData.movement.issued < 0
+                    ? 'text-purple-300'
+                    : movementActionData.movement.purchases !== 0
+                    ? 'text-rose-400'
+                    : 'text-blue-400'
+                }`}>
+                  {movementActionData.movement.issued < 0
+                    ? `N.C. ${formatCurrency(movementActionData.movement.issued)}`
+                    : movementActionData.movement.purchases !== 0
+                    ? `Costo ${formatCurrency(movementActionData.movement.purchases)}`
+                    : `Ricavo ${formatCurrency(movementActionData.movement.issued)}`}
+                </span>
               </div>
             </div>
-          ) : (
-            ''
-          )
-        }
-        confirmText="Elimina Riga"
-        cancelText="Annulla"
-        onConfirm={() => {
-          if (movementToDelete) {
-            onUpdateCantiere({
-              ...cantiere,
-              movements: cantiere.movements.filter((m) => m.id !== movementToDelete.id),
-              updatedAt: new Date().toISOString(),
-            });
-            setMovementToDelete(null);
-          }
-        }}
-        onCancel={() => setMovementToDelete(null)}
-      />
 
-      {/* Modal for Deleting Invoice Linked to Multiple Cantieri or Sospesi */}
-      {linkedInvoiceToDelete && (
-        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-amber-500/50 rounded-2xl max-w-xl w-full p-5 sm:p-6 shadow-2xl text-left space-y-4 animate-scaleIn">
-            <div className="flex items-start gap-3">
-              <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-xl shrink-0">
-                <AlertTriangle className="h-6 w-6" />
-              </div>
-              <div className="space-y-1">
-                <h3 className="text-base font-bold text-white">
-                  Fattura presente in più cantieri o schede
-                </h3>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  La fattura <strong className="text-amber-300 font-mono">N° {linkedInvoiceToDelete.linkedInfo.invoiceNum || linkedInvoiceToDelete.movement.docNumber}</strong>{' '}
-                  {linkedInvoiceToDelete.linkedInfo.supplierOrClient && (
-                    <span>({linkedInvoiceToDelete.linkedInfo.supplierOrClient}) </span>
-                  )}
-                  risulta inserita sia in questo cantiere sia in altri cantieri (o nei sospesi):
+            {/* STEP 1: CHOOSE ACTION */}
+            {deleteModalStep === 'choose_action' && (
+              <div className="space-y-3 pt-1">
+                <p className="text-xs font-semibold text-slate-300">
+                  Cosa desideri fare con questa voce? Scegli un'opzione:
                 </p>
-              </div>
-            </div>
 
-            {/* List of occurrences */}
-            <div className="space-y-2">
-              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                Presenza registrata nel gestionale:
-              </div>
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2 max-h-56 overflow-y-auto">
-                {/* Current cantiere */}
-                <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-900 border border-amber-500/30 text-xs">
-                  <div className="min-w-0 flex-1">
-                    <div className="font-bold text-white flex items-center gap-1.5 truncate">
-                      <Building className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                      <span>{cantiere.name}</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold">
-                        Cantiere Attuale
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-400 font-mono mt-0.5 truncate">
-                      Doc: {linkedInvoiceToDelete.movement.docNumber} • Data: {formatDateItalian(linkedInvoiceToDelete.movement.date)}
+                {/* Option 1: Move to Sospesi */}
+                <div className="p-3.5 rounded-xl bg-amber-950/20 border border-amber-500/30 hover:border-amber-500/50 transition-all space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-amber-500/20 text-amber-300 rounded-lg shrink-0">
+                        <Layers className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-amber-300">
+                          1. Sposta nella Scheda Sospesi
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
+                          Rimuove il costo da questo cantiere e lo conserva nei Sospesi per decidere in seguito con il committente.
+                        </p>
+                      </div>
                     </div>
                   </div>
-                  <div className={`font-mono font-bold whitespace-nowrap ${
-                    linkedInvoiceToDelete.movement.issued < 0
-                      ? 'text-purple-300'
-                      : linkedInvoiceToDelete.movement.purchases !== 0
-                      ? 'text-rose-300'
-                      : 'text-blue-300'
-                  }`}>
-                    {linkedInvoiceToDelete.movement.purchases !== 0
-                      ? formatCurrency(linkedInvoiceToDelete.movement.purchases)
-                      : formatCurrency(linkedInvoiceToDelete.movement.issued)}
+                  <div className="text-right pt-1">
+                    <button
+                      type="button"
+                      onClick={handleConfirmMoveToSospesi}
+                      className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-sm inline-flex items-center gap-1.5"
+                    >
+                      <Layers className="h-3.5 w-3.5" />
+                      <span>Sposta nei Sospesi</span>
+                    </button>
                   </div>
                 </div>
 
-                {/* Other cantieri */}
-                {linkedInvoiceToDelete.linkedInfo.otherCantieriMatches.map((m, idx) => (
-                  <div key={idx} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-900/60 border border-slate-800 text-xs">
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold text-slate-200 flex items-center gap-1.5 truncate">
-                        <Building className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                        <span>{m.cantiereName}</span>
-                        {m.client && <span className="text-[11px] text-slate-400 font-normal">({m.client})</span>}
-                      </div>
-                      <div className="text-[11px] text-slate-400 font-mono mt-0.5 truncate">
-                        Doc: {m.movement.docNumber} • Data: {formatDateItalian(m.movement.date)}
-                      </div>
+                {/* Option 2: Move to Another Cantiere */}
+                <div className="p-3.5 rounded-xl bg-blue-950/20 border border-blue-500/30 hover:border-blue-500/50 transition-all space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-blue-500/20 text-blue-300 rounded-lg shrink-0">
+                      <ArrowRightLeft className="h-4 w-4" />
                     </div>
-                    <div className={`font-mono font-bold whitespace-nowrap ${
-                      m.movement.issued < 0 ? 'text-purple-300' : 'text-slate-300'
-                    }`}>
-                      {m.movement.purchases !== 0
-                        ? formatCurrency(m.movement.purchases)
-                        : formatCurrency(m.movement.issued)}
+                    <div>
+                      <div className="text-xs font-bold text-blue-300">
+                        2. Sposta in un altro Cantiere
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
+                        Trasferisce direttamente questo DDT/costo nella scheda di un altro cantiere dello stesso artigiano.
+                      </p>
                     </div>
                   </div>
-                ))}
 
-                {/* Sospesi */}
-                {linkedInvoiceToDelete.linkedInfo.sospesiMatches.map((s, idx) => (
-                  <div key={idx} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-amber-950/20 border border-amber-500/20 text-xs">
-                    <div className="min-w-0 flex-1">
-                      <div className="font-bold text-amber-300 flex items-center gap-1.5 truncate">
-                        <Layers className="h-3.5 w-3.5 shrink-0" />
-                        <span>Scheda Sospesi</span>
-                      </div>
-                      <div className="text-[11px] text-slate-400 font-mono mt-0.5 truncate">
-                        Doc: {s.docNumber} • {s.description}
-                      </div>
+                  {allCantieri.filter((c) => c.id !== cantiere.id).length > 0 ? (
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                      <select
+                        value={targetMoveCantiereId}
+                        onChange={(e) => setTargetMoveCantiereId(e.target.value)}
+                        className="flex-1 bg-slate-900 border border-slate-700 text-white rounded-lg p-2 text-xs focus:outline-none focus:border-blue-400"
+                      >
+                        {allCantieri
+                          .filter((c) => c.id !== cantiere.id)
+                          .map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name} {c.client ? `(${c.client} - ${c.city})` : `(${c.city})`}
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleConfirmMoveToOtherCantiere}
+                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-sm shrink-0 inline-flex items-center justify-center gap-1.5"
+                      >
+                        <ArrowRightLeft className="h-3.5 w-3.5" />
+                        <span>Sposta nel Cantiere</span>
+                      </button>
                     </div>
-                    <div className="font-mono font-bold text-amber-300 whitespace-nowrap">
-                      {formatCurrency(s.amount)}
+                  ) : (
+                    <div className="text-[11px] text-slate-500 italic bg-slate-950/40 p-2 rounded-lg border border-slate-800">
+                      Nessun altro cantiere registrato per questo artigiano. Creane prima un altro se desideri spostarlo.
+                    </div>
+                  )}
+                </div>
+
+                {/* Option 3: Delete Permanently */}
+                <div className="p-3.5 rounded-xl bg-rose-950/20 border border-rose-500/30 hover:border-rose-500/50 transition-all space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-rose-500/20 text-rose-300 rounded-lg shrink-0">
+                      <Trash2 className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-rose-300">
+                        3. Cancella Definitivamente
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
+                        Elimina in modo irreversibile questo movimento contabile da tutti i registri.
+                      </p>
                     </div>
                   </div>
-                ))}
+                  <div className="text-right pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setDeleteModalStep('confirm_permanent_delete')}
+                      className="px-3.5 py-1.5 bg-rose-600/30 hover:bg-rose-600 text-rose-200 hover:text-white border border-rose-500/40 text-xs font-bold rounded-lg cursor-pointer transition-colors inline-flex items-center gap-1.5"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Cancella Definitivamente...</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-800 text-right">
+                  <button
+                    type="button"
+                    onClick={() => setMovementActionData(null)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+                  >
+                    Annulla
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
-            <p className="text-xs font-semibold text-slate-200">
-              Come desideri procedere con l'eliminazione?
-            </p>
+            {/* STEP 2: CONFIRM PERMANENT DELETE (WITH EXPLICIT WARNING) */}
+            {deleteModalStep === 'confirm_permanent_delete' && (
+              <div className="space-y-4 pt-1 animate-fadeIn">
+                {/* Big Red Warning Box */}
+                <div className="p-4 rounded-xl bg-rose-950/50 border-2 border-rose-500/70 text-rose-200 space-y-2">
+                  <div className="flex items-center gap-2 text-rose-300 font-bold text-sm">
+                    <AlertTriangle className="h-5 w-5 shrink-0 text-rose-400" />
+                    <span>ATTENZIONE: CANCELLAZIONE DEFINITIVA IRREVERSIBILE</span>
+                  </div>
+                  <p className="text-xs leading-relaxed text-rose-200/90 font-medium">
+                    Stai per eliminare per sempre questo documento dal cantiere.
+                    Questa operazione <strong className="text-white underline">non può essere annullata</strong> e la voce <strong className="text-white">non sarà più recuperabile</strong>, né nei cantieri né nei sospesi.
+                  </p>
+                </div>
 
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-3 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => setLinkedInvoiceToDelete(null)}
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors text-center"
-              >
-                Annulla
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onUpdateCantiere({
-                    ...cantiere,
-                    movements: cantiere.movements.filter((m) => m.id !== linkedInvoiceToDelete.movement.id),
-                    updatedAt: new Date().toISOString(),
-                  });
-                  setLinkedInvoiceToDelete(null);
-                }}
-                className="px-3.5 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors text-center"
-              >
-                Cancella solo da questo cantiere
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (onDeleteMovementFromAllCantieri) {
-                    const linkedCantiereIds = linkedInvoiceToDelete.linkedInfo.otherCantieriMatches.map((m) => m.cantiereId);
-                    const linkedSospesiIds = linkedInvoiceToDelete.linkedInfo.sospesiMatches.map((s) => s.id);
-                    onDeleteMovementFromAllCantieri(
-                      cantiere.id,
-                      linkedInvoiceToDelete.movement,
-                      linkedCantiereIds,
-                      linkedSospesiIds
-                    );
-                  } else {
-                    onUpdateCantiere({
-                      ...cantiere,
-                      movements: cantiere.movements.filter((m) => m.id !== linkedInvoiceToDelete.movement.id),
-                      updatedAt: new Date().toISOString(),
-                    });
-                  }
-                  setLinkedInvoiceToDelete(null);
-                }}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <Trash2 className="h-4 w-4" />
-                <span>Cancella da TUTTI i cantieri (e sospesi)</span>
-              </button>
-            </div>
+                {/* If linked to multiple cantieri or sospesi, show occurrence list */}
+                {movementActionData.linkedInfo.isLinkedToMultiple && (
+                  <div className="space-y-2">
+                    <div className="text-[11px] font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <AlertCircle className="h-3.5 w-3.5 text-amber-400" />
+                      <span>Fattura presente anche in altri cantieri o schede:</span>
+                    </div>
+                    <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 space-y-1.5 max-h-40 overflow-y-auto text-xs">
+                      {movementActionData.linkedInfo.otherCantieriMatches.map((m, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-slate-300 border-b border-slate-800/80 pb-1 last:border-0 last:pb-0">
+                          <span className="font-semibold">{m.cantiereName} ({m.client || 'Cantiere'})</span>
+                          <span className="font-mono text-rose-300">{formatCurrency(m.movement.purchases || m.movement.issued)}</span>
+                        </div>
+                      ))}
+                      {movementActionData.linkedInfo.sospesiMatches.map((s, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-amber-300 border-b border-slate-800/80 pb-1 last:border-0 last:pb-0">
+                          <span className="font-semibold">Scheda Sospesi ({s.docNumber})</span>
+                          <span className="font-mono">{formatCurrency(s.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteModalStep('choose_action')}
+                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors text-center"
+                  >
+                    Torna alle opzioni
+                  </button>
+
+                  {movementActionData.linkedInfo.isLinkedToMultiple ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleConfirmDeleteSingle}
+                        className="px-3.5 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors text-center"
+                      >
+                        Cancella solo da questo cantiere
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleConfirmDeleteAll}
+                        className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        <span>Sì, cancella da TUTTI i cantieri (e sospesi)</span>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleConfirmDeleteSingle}
+                      className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-1.5"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      <span>Sì, Elimina Definitivamente</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

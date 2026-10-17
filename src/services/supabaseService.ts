@@ -173,14 +173,46 @@ export async function upsertArtigianoToSupabase(artigiano: Artigiano): Promise<v
     throw artError;
   }
 
-  // 2. Cantieri & Movements
+  // 2. Cantieri: clean up removed cantieri, then upsert current cantieri
+  const keepCantiereIds = (artigiano.cantieri || []).map((c) => c.id);
+  if (keepCantiereIds.length > 0) {
+    const { data: existingCantieri } = await supabase
+      .from('cantieri')
+      .select('id')
+      .eq('artigiano_id', artigiano.id);
+    const toDeleteCantieri = (existingCantieri || [])
+      .map((c: any) => c.id)
+      .filter((id: string) => !keepCantiereIds.includes(id));
+    if (toDeleteCantieri.length > 0) {
+      await supabase.from('cantieri').delete().in('id', toDeleteCantieri);
+    }
+  } else {
+    await supabase.from('cantieri').delete().eq('artigiano_id', artigiano.id);
+  }
+
   for (const cantiere of artigiano.cantieri || []) {
     await upsertCantiereToSupabase(artigiano.id, cantiere);
   }
 
-  // 3. Sospesi
-  for (const item of artigiano.sospesi || []) {
-    await upsertSospesoToSupabase(artigiano.id, item);
+  // 3. Sospesi: clean up removed sospesi, then upsert current sospesi
+  const keepSospesiIds = (artigiano.sospesi || []).map((s) => s.id);
+  if (keepSospesiIds.length > 0) {
+    const { data: existingSospesi } = await supabase
+      .from('sospesi')
+      .select('id')
+      .eq('artigiano_id', artigiano.id);
+    const toDeleteSospesi = (existingSospesi || [])
+      .map((s: any) => s.id)
+      .filter((id: string) => !keepSospesiIds.includes(id));
+    if (toDeleteSospesi.length > 0) {
+      await supabase.from('sospesi').delete().in('id', toDeleteSospesi);
+    }
+
+    for (const item of artigiano.sospesi || []) {
+      await upsertSospesoToSupabase(artigiano.id, item);
+    }
+  } else {
+    await supabase.from('sospesi').delete().eq('artigiano_id', artigiano.id);
   }
 }
 
@@ -212,8 +244,26 @@ export async function upsertCantiereToSupabase(artigianoId: string, cantiere: Ca
     throw cantiereError;
   }
 
-  // Upsert all movements for this cantiere
-  if (cantiere.movements && cantiere.movements.length > 0) {
+  // Clean up any movements in DB for this cantiere that are no longer present
+  const currentMovIds = (cantiere.movements || []).map((m) => m.id);
+  if (currentMovIds.length > 0) {
+    const { data: existingMovs } = await supabase
+      .from('movements')
+      .select('id')
+      .eq('cantiere_id', cantiere.id);
+    const toDeleteMovs = (existingMovs || [])
+      .map((m: any) => m.id)
+      .filter((id: string) => !currentMovIds.includes(id));
+    if (toDeleteMovs.length > 0) {
+      const { error: delError } = await supabase
+        .from('movements')
+        .delete()
+        .in('id', toDeleteMovs);
+      if (delError) {
+        console.error('Error cleaning up deleted movements in Supabase:', delError);
+      }
+    }
+
     const movRows = cantiere.movements.map((m) => ({
       id: m.id,
       cantiere_id: cantiere.id,
@@ -231,6 +281,15 @@ export async function upsertCantiereToSupabase(artigianoId: string, cantiere: Ca
     const { error: movError } = await supabase.from('movements').upsert(movRows);
     if (movError) {
       console.error('Error upserting movements in Supabase:', movError);
+    }
+  } else {
+    // If no movements remain in this cantiere, delete all movements for this cantiere in Supabase
+    const { error: delAllError } = await supabase
+      .from('movements')
+      .delete()
+      .eq('cantiere_id', cantiere.id);
+    if (delAllError) {
+      console.error('Error clearing movements in Supabase:', delAllError);
     }
   }
 }
