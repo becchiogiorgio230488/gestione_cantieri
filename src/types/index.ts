@@ -189,6 +189,13 @@ export interface ParsedInvoiceXML {
     data: string;
     numero: string;
     importoTotale: number;
+    totaleImponibile: number;
+    riepilogoIVA?: Array<{
+      aliquotaIVA: number;
+      imponibile: number;
+      imposta: number;
+      natura?: string;
+    }>;
     causale?: string[];
   };
   ddtList: InvoiceDDT[];

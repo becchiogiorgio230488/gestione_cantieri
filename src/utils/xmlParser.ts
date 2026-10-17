@@ -204,7 +204,49 @@ export function parseFatturaElettronicaXML(xmlString: string, fileName = 'fattur
     ddt.totaleDDT = Math.round(ddtSum * 100) / 100;
   }
 
-  // If importoTotale was 0 or missing, use calculated lines sum
+  // 5. DatiRiepilogo (Riepilogo IVA per tutte le aliquote e calcolo Totale Imponibile)
+  const datiRiepilogoElements = getElements(xmlDoc, 'DatiRiepilogo');
+  const riepilogoIVA: Array<{
+    aliquotaIVA: number;
+    imponibile: number;
+    imposta: number;
+    natura?: string;
+  }> = [];
+  let sumImponibiliRiepilogo = 0;
+
+  for (const rEl of datiRiepilogoElements) {
+    const aliquotaIVAStr = getTagText(rEl, 'AliquotaIVA');
+    const imponibileStr = getTagText(rEl, 'ImponibileImporto');
+    const impostaStr = getTagText(rEl, 'Imposta');
+    const natura = getTagText(rEl, 'Natura');
+
+    const aliquotaIVA = aliquotaIVAStr ? parseFloat(aliquotaIVAStr.replace(',', '.')) : 0;
+    const imponibile = imponibileStr ? parseFloat(imponibileStr.replace(',', '.')) : 0;
+    const imposta = impostaStr ? parseFloat(impostaStr.replace(',', '.')) : 0;
+
+    if (!isNaN(imponibile) && imponibile !== 0) {
+      sumImponibiliRiepilogo += imponibile;
+      riepilogoIVA.push({
+        aliquotaIVA,
+        imponibile: Math.round(imponibile * 100) / 100,
+        imposta: Math.round(imposta * 100) / 100,
+        natura: natura || undefined,
+      });
+    }
+  }
+
+  // Totale imponibile: se presenti più aliquote IVA, somma tutti gli imponibili;
+  // altrimenti usa la somma dei prezzi totali delle righe (imponibili riga per riga)
+  let totaleImponibile = 0;
+  if (sumImponibiliRiepilogo !== 0) {
+    totaleImponibile = Math.round(sumImponibiliRiepilogo * 100) / 100;
+  } else if (calculatedLinesSum > 0) {
+    totaleImponibile = Math.round(calculatedLinesSum * 100) / 100;
+  } else {
+    totaleImponibile = Math.round(importoTotale * 100) / 100;
+  }
+
+  // If importoTotale was 0 or missing, use calculated lines sum or imponibile
   if (importoTotale === 0 && calculatedLinesSum > 0) {
     importoTotale = Math.round(calculatedLinesSum * 100) / 100;
   }
@@ -226,6 +268,8 @@ export function parseFatturaElettronicaXML(xmlString: string, fileName = 'fattur
       data,
       numero: numero || 'N/D',
       importoTotale: Math.round(importoTotale * 100) / 100,
+      totaleImponibile,
+      riepilogoIVA,
       causale,
     },
     ddtList,

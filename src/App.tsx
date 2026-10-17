@@ -491,6 +491,41 @@ export default function App() {
     setCantiereToEdit(null);
   };
 
+  // Directly create a new cantiere on-the-fly (e.g. from XML import dropdown)
+  const handleCreateNewCantiereDirectly = (cantiereData: Partial<Cantiere>): Cantiere => {
+    const activeArt = currentArtigiano;
+    const upperName = (cantiereData.name || 'NUOVO CANTIERE').trim().toUpperCase();
+    const upperCity = (cantiereData.city || activeArt?.city || 'MILANO').trim().toUpperCase();
+    const upperAddress = cantiereData.address?.trim() ? cantiereData.address.trim().toUpperCase() : '';
+
+    const newC: Cantiere = {
+      id: `cantiere-${Date.now()}`,
+      name: upperName,
+      city: upperCity,
+      address: upperAddress || '',
+      date: cantiereData.date || new Date().toISOString().slice(0, 10),
+      year: cantiereData.year || activeArt?.year || 2026,
+      client: cantiereData.client ? cantiereData.client.trim().toUpperCase() : upperName,
+      initialInventory: cantiereData.initialInventory || 0,
+      finalInventory: cantiereData.finalInventory || 0,
+      category: cantiereData.category || activeArt?.category || 'elettrico',
+      status: cantiereData.status || 'attivo',
+      notes: cantiereData.notes || '',
+      movements: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    updateCurrentArtigiano((art) => ({
+      ...art,
+      cantieri: [...art.cantieri, newC],
+      updatedAt: new Date().toISOString(),
+    }));
+
+    showNotification(`Nuovo cantiere "${newC.name} (${newC.city})" creato con successo!`);
+    return newC;
+  };
+
   // XML Import allocations (Handles both cantiere movements and/or sospesi in one atomic operation)
   const handleCommitXmlAllocations = (
     movementsByCantiere: { cantiereId: string; movement: Movement }[],
@@ -1328,6 +1363,7 @@ export default function App() {
           onClose={() => setIsXmlModalOpen(false)}
           onCommitAllocations={handleCommitXmlAllocations}
           onCommitSospesi={handleCommitSospesiFromXml}
+          onCreateNewCantiereDirectly={handleCreateNewCantiereDirectly}
           onOpenNewCantiere={() => {
             setIsXmlModalOpen(false);
             setCantiereToEdit(null);
