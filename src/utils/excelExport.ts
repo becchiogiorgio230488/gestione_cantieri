@@ -1,7 +1,9 @@
 import ExcelJS from 'exceljs';
 import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
 import { Artigiano, Cantiere, SospesoItem, QuadraturaContabile } from '../types';
 import { calculateCantiereTotals, computeCantiereRF, formatDateItalian } from './calculations';
+import { getCantiereFileName } from './pdfExport';
 
 /**
  * Common border definitions for ExcelJS
@@ -323,7 +325,8 @@ export function buildCantiereDetailSheet(
 export function createProspettoSheet(
   workbook: ExcelJS.Workbook,
   artigiano: Artigiano,
-  sheetName: string = 'Prospetto Cantieri'
+  sheetName: string = 'Prospetto Cantieri',
+  dataAggiornamento?: string
 ): ExcelJS.Worksheet {
   const ws = workbook.addWorksheet(sheetName, {
     views: [{ showGridLines: true }]
@@ -352,14 +355,28 @@ export function createProspettoSheet(
   cellDittaHeader.font = { name: 'Calibri', size: 13, bold: true, color: { argb: 'FF000000' } };
   cellDittaHeader.alignment = { vertical: 'middle', horizontal: 'left' };
 
-  const rowSub = ws.addRow([
-    `PROSPETTO GENERALE CANTIERI • ANNO ${artigiano.year || 2026} • DATA: ${new Date().toLocaleDateString('it-IT')}`,
-    '', '', '', '', '', ''
-  ]);
-  rowSub.height = 18;
+  // Sottotitolo: "PROSPETTO GENERALE CANTIERI • ANNO [Anno] • DATA DI STAMPA: [data] - CANTIERI AGGIORNATI AL "
+  // con la data di aggiornamento cantieri in GRASSETTO
+  const dataStampa = new Date().toLocaleDateString('it-IT');
+  const anno = artigiano.year || 2026;
+  const dataAggiornataText = (dataAggiornamento || dataStampa).trim();
+
+  const rowSub = ws.addRow(['', '', '', '', '', '', '']);
+  rowSub.height = 20;
   ws.mergeCells(`A2:G2`);
   const cellSub = ws.getCell('A2');
-  cellSub.font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF555555' } };
+  cellSub.value = {
+    richText: [
+      {
+        text: `PROSPETTO GENERALE CANTIERI • ANNO ${anno} • DATA DI STAMPA: ${dataStampa} - CANTIERI AGGIORNATI AL `,
+        font: { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF555555' } },
+      },
+      {
+        text: dataAggiornataText,
+        font: { name: 'Calibri', size: 9, bold: true, color: { argb: 'FF000000' } },
+      },
+    ],
+  };
   cellSub.alignment = { vertical: 'middle', horizontal: 'left' };
 
   // Blank row 3
@@ -390,7 +407,19 @@ export function createProspettoSheet(
     };
   });
 
-  const cantieri = artigiano.cantieri || [];
+  // L'elenco dei cantieri nella tabella deve essere in ordine di CITTA'
+  const rawCantieri = artigiano.cantieri || [];
+  const cantieri = [...rawCantieri].sort((a, b) => {
+    const cityA = (a.city || '').trim().toUpperCase();
+    const cityB = (b.city || '').trim().toUpperCase();
+    if (cityA !== cityB) {
+      return cityA.localeCompare(cityB, 'it', { sensitivity: 'base' });
+    }
+    const addrA = (a.address || a.name || '').trim().toUpperCase();
+    const addrB = (b.address || b.name || '').trim().toUpperCase();
+    return addrA.localeCompare(addrB, 'it', { sensitivity: 'base' });
+  });
+
   const startDataRow = 5;
 
   // Data rows for cantieri
@@ -682,7 +711,8 @@ export function createProspettoSheet(
 }
 
 /**
- * Export single cantiere to Excel
+ * Export single cantiere to Excel with standard file naming:
+ * "città del cantiere - la via del cantiere.xlsx" or fallback to cantiere.name
  */
 export async function exportSingleCantiereExcel(
   cantiere: Cantiere,
@@ -694,20 +724,19 @@ export async function exportSingleCantiereExcel(
 
   buildCantiereDetailSheet(workbook, cantiere, dittaName, cantiere.name || 'Scheda Cantiere');
 
-  const safeClient = (cantiere.client || cantiere.name || 'CANTIERE')
-    .replace(/[^a-zA-Z0-9]/g, '_')
-    .slice(0, 30);
-  const fileName = `Z_CANTIERE_${safeClient}_${cantiere.year || 2026}.xlsx`;
+  const fileName = getCantiereFileName(cantiere, 'xlsx');
   await saveWorkbook(workbook, fileName);
 }
 
 /**
- * Export Prospetto Generale for an artisan or cantieri list
+ * Export Prospetto Generale for an artisan or cantieri list.
+ * EXPORTA SOLO IL PROSPETTO GENERALE (senza creare nello stesso file un foglio per ogni cantiere).
  */
 export async function exportProspettoGeneraleExcel(
   target: Artigiano | Cantiere[],
   quadratura?: QuadraturaContabile,
-  sospesi?: SospesoItem[]
+  sospesi?: SospesoItem[],
+  dataAggiornamento?: string
 ): Promise<void> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Studio Contabile';
@@ -730,22 +759,76 @@ export async function exportProspettoGeneraleExcel(
     artigiano = target;
   }
 
-  // Foglio 1: Z-PROSPETTO CANTIERI
-  createProspettoSheet(workbook, artigiano, 'Z-PROSPETTO CANTIERI');
+  // Foglio UNICO: Z-PROSPETTO CANTIERI (nessun foglio per singoli cantieri)
+  createProspettoSheet(workbook, artigiano, 'Z-PROSPETTO CANTIERI', dataAggiornamento);
 
-  // Fogli di dettaglio per ciascun cantiere
-  const usedNames = new Set<string>(['Z-PROSPETTO CANTIERI']);
-  (artigiano.cantieri || []).forEach((c, idx) => {
-    let name = (c.name || `Cantiere ${idx + 1}`).replace(/[:\\/?*[\]]/g, '').slice(0, 25);
-    if (usedNames.has(name)) {
-      name = `${name.slice(0, 20)}_${idx + 1}`;
-    }
-    usedNames.add(name);
-    buildCantiereDetailSheet(workbook, c, artigiano.name, name);
-  });
-
-  const fileName = `Z-PROSPETTO_GENERALE_CANTIERI_${artigiano.name.replace(/[^a-zA-Z0-9]/g, '_')}_${artigiano.year || 2026}.xlsx`;
+  const cleanDitta = (artigiano.name || 'Impresa').replace(/[^a-zA-Z0-9]/g, '_');
+  const fileName = `PROSPETTO_GENERALE_CANTIERI_${cleanDitta}_${artigiano.year || 2026}.xlsx`;
   await saveWorkbook(workbook, fileName);
+}
+
+/**
+ * Esporta tutti i singoli cantieri in file Excel (.xlsx) separati,
+ * rinominati "città del cantiere - la via del cantiere.xlsx" (o nome cantiere se assenti).
+ * Raggruppati in un comodo archivio ZIP per il download istantaneo.
+ */
+export async function exportAllCantieriExcelZip(
+  cantieri: Cantiere[],
+  dittaName?: string,
+  year?: number
+): Promise<void> {
+  const zip = new JSZip();
+  const finalDitta = dittaName || 'Impresa';
+  const usedNames = new Map<string, number>();
+
+  for (const c of cantieri) {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Studio Contabile';
+    workbook.created = new Date();
+
+    buildCantiereDetailSheet(workbook, c, finalDitta, c.name || 'Cantiere');
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    let baseFileName = getCantiereFileName(c, 'xlsx');
+    if (usedNames.has(baseFileName)) {
+      const count = usedNames.get(baseFileName)! + 1;
+      usedNames.set(baseFileName, count);
+      baseFileName = baseFileName.replace(/\.xlsx$/i, `_${count}.xlsx`);
+    } else {
+      usedNames.set(baseFileName, 1);
+    }
+
+    zip.file(baseFileName, buffer);
+  }
+
+  const cleanDitta = finalDitta.replace(/[^a-zA-Z0-9]/g, '_');
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  const url = window.URL.createObjectURL(zipBlob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `Archivio_Singoli_Cantieri_XLS_${cleanDitta}_${year || 2026}.zip`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+/**
+ * Scarica ciascun singolo cantiere come file .xlsx individuale
+ */
+export async function exportAllCantieriExcelSeparate(
+  cantieri: Cantiere[],
+  dittaName?: string
+): Promise<void> {
+  const finalDitta = dittaName || 'Impresa';
+  for (let i = 0; i < cantieri.length; i++) {
+    const c = cantieri[i];
+    await exportSingleCantiereExcel(c, finalDitta);
+    // Piccolo ritardo di 150ms per consentire al browser di gestire i file
+    if (i < cantieri.length - 1) {
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
 }
 
 /**

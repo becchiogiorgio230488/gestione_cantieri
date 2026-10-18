@@ -28,6 +28,7 @@ import {
 import { Cantiere, Movement, SospesoItem, AttachmentPdf } from '../types';
 import { calculateCantiereTotals, formatCurrency, formatDateItalian, getTodayISODate } from '../utils/calculations';
 import { exportSingleCantiereExcel } from '../utils/excelExport';
+import { exportSingleCantierePdf } from '../utils/pdfExport';
 import { ConfirmModal } from './ConfirmModal';
 import { findLinkedInvoiceMovementsAcrossCantieri } from '../utils/invoiceDuplicateHelper';
 import { CantiereSearchSelect } from './CantiereSearchSelect';
@@ -460,19 +461,28 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
           <button
             onClick={() => exportSingleCantiereExcel(cantiere, artigianoName)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer"
-            title="Scarica file XLS (.xlsx) formattato del singolo cantiere con formule dei totali"
+            title="Scarica file XLS (.xlsx) formattato del singolo cantiere"
           >
             <FileSpreadsheet className="h-4 w-4" />
-            <span>Scarica XLS Cantiere</span>
+            <span>Scarica XLS</span>
+          </button>
+
+          <button
+            onClick={() => exportSingleCantierePdf(cantiere, artigianoName)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer"
+            title="Scarica file PDF (.pdf) del singolo cantiere"
+          >
+            <FileText className="h-4 w-4" />
+            <span>Scarica PDF</span>
           </button>
 
           <button
             onClick={onPrint}
             className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition-colors cursor-pointer"
-            title="Stampa scheda cantiere o salva in PDF"
+            title="Stampa scheda cantiere o visualizza anteprima A4"
           >
             <Printer className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Stampa / PDF</span>
+            <span className="hidden sm:inline">Stampa A4</span>
           </button>
 
           {onDeleteCantiere && (

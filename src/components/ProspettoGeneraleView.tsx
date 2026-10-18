@@ -21,6 +21,11 @@ import {
   ArrowRight,
   TrendingUp,
   Scale,
+  Archive,
+  Download,
+  Calendar,
+  X,
+  Loader2,
 } from 'lucide-react';
 import { Artigiano, Cantiere, QuadraturaContabile, MastrinoItem } from '../types';
 import {
@@ -31,7 +36,13 @@ import {
 import {
   exportProspettoGeneraleExcel,
   exportSingleCantiereExcel,
+  exportAllCantieriExcelZip,
+  exportAllCantieriExcelSeparate,
 } from '../utils/excelExport';
+import {
+  exportAllCantieriPdfZip,
+  getCantiereFileName,
+} from '../utils/pdfExport';
 import { ConfirmModal } from './ConfirmModal';
 
 interface ProspettoGeneraleViewProps {
@@ -45,7 +56,7 @@ interface ProspettoGeneraleViewProps {
   onOpenFatturaEmessa: () => void;
   onNavigateToSospesi: () => void;
   onUpdateQuadratura: (updated: QuadraturaContabile) => void;
-  onPrintProspetto: () => void;
+  onPrintProspetto: (dataAggiornamento?: string) => void;
   onUpdateCantiere?: (cantiere: Cantiere) => void;
   onEditArtigiano?: (artigiano: Artigiano) => void;
   onDeleteArtigiano?: (artigianoId: string) => void;
@@ -73,6 +84,68 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
   const [cantiereToDelete, setCantiereToDelete] = useState<Cantiere | null>(null);
   const [isConfirmDeleteArtigianoOpen, setIsConfirmDeleteArtigianoOpen] = useState(false);
   const [isQuadraturaSaved, setIsQuadraturaSaved] = useState(false);
+
+  // Export Prospetto Date Modal state
+  const [isDateExportModalOpen, setIsDateExportModalOpen] = useState(false);
+  const [pendingExportMode, setPendingExportMode] = useState<'excel' | 'pdf'>('excel');
+  const [dataAggiornamentoInput, setDataAggiornamentoInput] = useState<string>(() => {
+    return new Date().toLocaleDateString('it-IT');
+  });
+
+  // Batch Export Single Cantieri Modal state
+  const [isBatchExportModalOpen, setIsBatchExportModalOpen] = useState(false);
+  const [isBatchExporting, setIsBatchExporting] = useState(false);
+  const [batchSuccessMessage, setBatchSuccessMessage] = useState<string | null>(null);
+
+  const handleOpenExportDateModal = (mode: 'excel' | 'pdf') => {
+    setPendingExportMode(mode);
+    setIsDateExportModalOpen(true);
+  };
+
+  const handleConfirmDateExport = (forcedMode?: 'excel' | 'pdf') => {
+    const mode = forcedMode || pendingExportMode;
+    const dateToUse = (dataAggiornamentoInput || new Date().toLocaleDateString('it-IT')).trim();
+    setIsDateExportModalOpen(false);
+
+    if (mode === 'excel') {
+      exportProspettoGeneraleExcel(artigiano, undefined, undefined, dateToUse);
+    } else {
+      onPrintProspetto(dateToUse);
+    }
+  };
+
+  const handleBatchExportExcelZip = async () => {
+    try {
+      setIsBatchExporting(true);
+      await exportAllCantieriExcelZip(artigiano.cantieri || [], artigiano.name, artigiano.year);
+      setBatchSuccessMessage('Archivio ZIP Excel generato e scaricato con successo!');
+      setTimeout(() => setBatchSuccessMessage(null), 3500);
+    } finally {
+      setIsBatchExporting(false);
+    }
+  };
+
+  const handleBatchExportPdfZip = async () => {
+    try {
+      setIsBatchExporting(true);
+      await exportAllCantieriPdfZip(artigiano.cantieri || [], artigiano.name, artigiano.year);
+      setBatchSuccessMessage('Archivio ZIP PDF generato e scaricato con successo!');
+      setTimeout(() => setBatchSuccessMessage(null), 3500);
+    } finally {
+      setIsBatchExporting(false);
+    }
+  };
+
+  const handleBatchExportExcelSeparate = async () => {
+    try {
+      setIsBatchExporting(true);
+      await exportAllCantieriExcelSeparate(artigiano.cantieri || [], artigiano.name);
+      setBatchSuccessMessage('Download dei singoli file Excel avviato!');
+      setTimeout(() => setBatchSuccessMessage(null), 3500);
+    } finally {
+      setIsBatchExporting(false);
+    }
+  };
 
   // Quick inline name editing state
   const [editingNameCantiereId, setEditingNameCantiereId] = useState<string | null>(null);
@@ -510,24 +583,34 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
               <span>+ Nuovo Cantiere</span>
             </button>
 
-            {/* Excel Export Prospetto + Cantieri */}
+            {/* Esporta Tutti i Singoli Cantieri (un file per cantiere: Città - Via) */}
             <button
-              onClick={() => exportProspettoGeneraleExcel(artigiano)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-sm cursor-pointer"
-              title="Esporta foglio Excel (.xlsx) con tabella formattata, totali e quadratura"
+              onClick={() => setIsBatchExportModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-sm cursor-pointer"
+              title="Esporta tutti i singoli cantieri in file separati (XLS o PDF) rinominati: Città - Via"
             >
-              <FileSpreadsheet className="h-4 w-4 text-white" />
+              <Archive className="h-4 w-4 text-indigo-200" />
+              <span>Esporta Singoli Cantieri</span>
+            </button>
+
+            {/* Excel Export Prospetto Generale (chiede data aggiornamento) */}
+            <button
+              onClick={() => handleOpenExportDateModal('excel')}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-sm cursor-pointer"
+              title="Esporta foglio Excel (.xlsx) del solo Prospetto Generale con quadratura e data aggiornamento"
+            >
+              <FileSpreadsheet className="h-4 w-4 text-emerald-200" />
               <span>Esporta Prospetto Excel</span>
             </button>
 
-            {/* Print Report */}
+            {/* Print Report / PDF (chiede data aggiornamento) */}
             <button
-              onClick={onPrintProspetto}
+              onClick={() => handleOpenExportDateModal('pdf')}
               className="inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
-              title="Stampa Report A4"
+              title="Stampa Report A4 o esporta in PDF il Prospetto Generale"
             >
               <Printer className="h-4 w-4 text-slate-300" />
-              <span>Stampa</span>
+              <span>Stampa / PDF</span>
             </button>
           </div>
         </div>
@@ -1490,6 +1573,219 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
         }}
         onCancel={() => setIsConfirmDeleteArtigianoOpen(false)}
       />
+
+      {/* ========================================================= */}
+      {/* MODAL RICHIESTA DATA AGGIORNAMENTO CANTIERI */}
+      {/* ========================================================= */}
+      {isDateExportModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border-2 border-slate-700 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg">
+                  <Calendar className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Data Aggiornamento Cantieri</h3>
+                  <p className="text-xs text-slate-400">Personalizza il sottotitolo del Prospetto Generale</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsDateExportModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Nel sottotitolo ufficiale del documento (dopo la Ditta) comparirà la dicitura:
+              </p>
+              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs font-mono text-slate-300 leading-relaxed">
+                PROSPETTO GENERALE CANTIERI • ANNO {artigiano.year || 2026} • DATA DI STAMPA: {new Date().toLocaleDateString('it-IT')} - CANTIERI AGGIORNATI AL{' '}
+                <strong className="text-amber-400 font-extrabold">{dataAggiornamentoInput || '...'}</strong>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-200 mb-1.5 uppercase tracking-wider">
+                  Quale data inserire per l'aggiornamento dei cantieri?
+                </label>
+                <input
+                  type="text"
+                  value={dataAggiornamentoInput}
+                  onChange={(e) => setDataAggiornamentoInput(e.target.value)}
+                  placeholder="es. 18/10/2026"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-sm font-bold text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsDateExportModalOpen(false)}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Annulla
+              </button>
+
+              <div className="flex items-center gap-2">
+                {pendingExportMode === 'excel' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmDateExport('pdf')}
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                      title="Apri invece visualizzazione Stampa / PDF"
+                    >
+                      Stampa PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmDateExport('excel')}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+                    >
+                      <FileSpreadsheet className="h-4 w-4" />
+                      <span>Conferma ed Esporta Excel</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmDateExport('excel')}
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                      title="Esporta invece in Excel (.xlsx)"
+                    >
+                      Esporta Excel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmDateExport('pdf')}
+                      className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-extrabold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Printer className="h-4 w-4" />
+                      <span>Conferma e Apri Stampa / PDF</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL ESPORTAZIONE DI TUTTI I SINGOLI CANTIERI */}
+      {/* ========================================================= */}
+      {isBatchExportModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border-2 border-slate-700 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg">
+                  <Archive className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Esporta Tutti i Singoli Cantieri</h3>
+                  <p className="text-xs text-slate-400">
+                    Un file per ciascun cantiere ({artigiano.cantieri?.length || 0} cantieri)
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsBatchExportModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="bg-slate-950/70 border border-slate-800 p-3.5 rounded-xl space-y-1 text-xs text-slate-300">
+                <div className="font-bold text-white flex items-center gap-1.5">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                  <span>Regola di Denominazione Automatica:</span>
+                </div>
+                <p className="text-slate-400 pl-5">
+                  Ogni file viene salvato come <code className="text-amber-300 font-bold bg-slate-900 px-1 py-0.5 rounded">Città del cantiere - Via del cantiere.[ext]</code>. Se città o via non sono presenti, viene utilizzato il nome del cantiere.
+                </p>
+              </div>
+
+              {/* Anteprima file generati */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Anteprima Nomi File ({artigiano.cantieri?.length || 0}):
+                </label>
+                <div className="max-h-40 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl p-2.5 space-y-1 text-xs font-mono">
+                  {(artigiano.cantieri || []).length === 0 ? (
+                    <div className="text-slate-500 italic p-2 text-center">Nessun cantiere presente</div>
+                  ) : (
+                    (artigiano.cantieri || []).map((c, i) => {
+                      const nameXlsx = getCantiereFileName(c, 'xlsx');
+                      return (
+                        <div key={c.id || i} className="flex items-center justify-between text-slate-300 hover:bg-slate-900 px-2 py-1 rounded">
+                          <span className="truncate pr-2">{nameXlsx}</span>
+                          <span className="text-[10px] text-slate-500 shrink-0 uppercase">{c.city || 'Senza città'}</span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {batchSuccessMessage && (
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                  <span>{batchSuccessMessage}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                disabled={isBatchExporting || (artigiano.cantieri || []).length === 0}
+                onClick={handleBatchExportExcelZip}
+                className="flex items-center justify-center gap-2 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer"
+              >
+                {isBatchExporting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <FileSpreadsheet className="h-4 w-4" />
+                )}
+                <span>📦 Scarica Tutti in XLS (ZIP)</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isBatchExporting || (artigiano.cantieri || []).length === 0}
+                onClick={handleBatchExportPdfZip}
+                className="flex items-center justify-center gap-2 px-3.5 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 rounded-xl text-xs font-black transition-all shadow-md cursor-pointer"
+              >
+                {isBatchExporting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Printer className="h-4 w-4" />
+                )}
+                <span>📄 Scarica Tutti in PDF (ZIP)</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isBatchExporting || (artigiano.cantieri || []).length === 0}
+                onClick={handleBatchExportExcelSeparate}
+                className="col-span-1 sm:col-span-2 flex items-center justify-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>💾 Scarica File Excel Individuali (.xlsx)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

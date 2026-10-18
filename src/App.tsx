@@ -66,6 +66,7 @@ export default function App() {
   const [isPrintCantiereView, setIsPrintCantiereView] = useState(false);
   const [isPrintProspettoView, setIsPrintProspettoView] = useState(false);
   const [isPrintSospesiView, setIsPrintSospesiView] = useState(false);
+  const [dataAggiornamentoProspetto, setDataAggiornamentoProspetto] = useState<string>('');
 
   // Modals
   const [isArtigianoModalOpen, setIsArtigianoModalOpen] = useState(false);
@@ -1370,6 +1371,7 @@ export default function App() {
     return (
       <PrintableProspettoReport
         artigiano={currentArtigiano}
+        dataAggiornamento={dataAggiornamentoProspetto}
         onBack={() => setIsPrintProspettoView(false)}
       />
     );
@@ -1482,7 +1484,10 @@ export default function App() {
             onOpenFatturaEmessa={() => setIsFatturaEmessaModalOpen(true)}
             onNavigateToSospesi={() => setNavLevel('scheda_sospesi')}
             onUpdateQuadratura={handleUpdateQuadratura}
-            onPrintProspetto={() => setIsPrintProspettoView(true)}
+            onPrintProspetto={(date) => {
+              setDataAggiornamentoProspetto(date || '');
+              setIsPrintProspettoView(true);
+            }}
             onEditArtigiano={(art) => {
               setArtigianoToEdit(art);
               setIsArtigianoModalOpen(true);

@@ -10,19 +10,38 @@ import { exportProspettoGeneraleExcel } from '../utils/excelExport';
 
 interface PrintableProspettoReportProps {
   artigiano: Artigiano;
+  dataAggiornamento?: string;
   onBack: () => void;
 }
 
 export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> = ({
   artigiano,
+  dataAggiornamento,
   onBack,
 }) => {
+  const [currentDataAggiornamento, setCurrentDataAggiornamento] = React.useState(
+    dataAggiornamento || new Date().toLocaleDateString('it-IT')
+  );
+
   let sumRI = 0;
   let sumAcquisti = 0;
   let sumEmesse = 0;
   let sumRF = 0;
 
-  const rows = (artigiano.cantieri || []).map((c) => {
+  // L'elenco dei cantieri nella tabella deve essere in ordine di CITTA'
+  const rawCantieri = artigiano.cantieri || [];
+  const sortedCantieri = [...rawCantieri].sort((a, b) => {
+    const cityA = (a.city || '').trim().toUpperCase();
+    const cityB = (b.city || '').trim().toUpperCase();
+    if (cityA !== cityB) {
+      return cityA.localeCompare(cityB, 'it', { sensitivity: 'base' });
+    }
+    const addrA = (a.address || a.name || '').trim().toUpperCase();
+    const addrB = (b.address || b.name || '').trim().toUpperCase();
+    return addrA.localeCompare(addrB, 'it', { sensitivity: 'base' });
+  });
+
+  const rows = sortedCantieri.map((c) => {
     const t = calculateCantiereTotals(c);
     const ri = Number(c.initialInventory) || 0;
     const acq = t.totaleAcquisti;
@@ -71,6 +90,8 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
   const sbilancioAcq = Math.round((totMastriAcq - finalAcq) * 100) / 100;
   const sbilancioVen = Math.round((totMastriVen - finalEme) * 100) / 100;
 
+  const dataStampa = new Date().toLocaleDateString('it-IT');
+
   return (
     <div className="bg-white text-black min-h-screen p-6 sm:p-10 font-sans">
       {/* Controls (hidden on print) */}
@@ -85,7 +106,7 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
 
         <div className="flex items-center gap-2.5">
           <button
-            onClick={() => exportProspettoGeneraleExcel(artigiano)}
+            onClick={() => exportProspettoGeneraleExcel(artigiano, undefined, undefined, currentDataAggiornamento)}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold cursor-pointer"
           >
             <Download className="h-4 w-4" />
@@ -110,12 +131,20 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
             <div className="text-sm font-bold text-slate-900 uppercase tracking-wide">
               DITTA: <span className="text-base font-extrabold text-slate-950">{artigiano.name.toUpperCase()}</span>
             </div>
-            <h1 className="text-lg font-black tracking-tight text-slate-900 uppercase mt-0.5">
-              PROSPETTO GENERALE CANTIERI • ANNO {artigiano.year || 2026}
-            </h1>
+            <div className="text-xs text-slate-800 uppercase mt-1">
+              PROSPETTO GENERALE CANTIERI • ANNO {artigiano.year || 2026} • DATA DI STAMPA: {dataStampa} - CANTIERI AGGIORNATI AL{' '}
+              <strong className="font-extrabold text-black text-sm">{currentDataAggiornamento}</strong>
+            </div>
           </div>
-          <div className="text-right text-xs text-slate-600 font-mono">
-            <div>Data emissione: {new Date().toLocaleDateString('it-IT')}</div>
+          <div className="text-right text-xs text-slate-600 font-mono no-print">
+            <label className="text-[10px] text-slate-500 uppercase block font-sans font-bold">Data Aggiornamento:</label>
+            <input
+              type="text"
+              value={currentDataAggiornamento}
+              onChange={(e) => setCurrentDataAggiornamento(e.target.value)}
+              className="text-xs font-bold border border-slate-300 rounded px-1.5 py-0.5 text-right w-28 bg-slate-50"
+              placeholder="GG/MM/AAAA"
+            />
           </div>
         </div>
 
