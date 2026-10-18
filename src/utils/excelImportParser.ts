@@ -438,18 +438,9 @@ export function parseSingolaSchedaExcel(
     const rawIssued = parseExcelNumber(row[colEmesse]);
 
     if (isRI) {
-      initialInventory = rawPurchases || initialInventory;
-      // Record special RI movement
-      movements.push({
-        id: `imp-ri-${r}-${Date.now()}`,
-        date: parseExcelDate(row[colDate]),
-        docNumber: docNumber || 'R.I.',
-        typeAndSubject: 'RIMANENZE INIZIALI (R.I.)',
-        protocol: String(row[colProt] || '').trim(),
-        purchases: rawPurchases,
-        issued: rawIssued,
-        isSpecialRI: true,
-      });
+      // L'importo della colonna acquisti viene inserito nelle RIMANENZE INIZIALI del cantiere
+      // e NON come riga nel registro movimenti di cantiere
+      initialInventory = rawPurchases;
       continue;
     }
 
