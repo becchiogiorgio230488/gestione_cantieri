@@ -439,21 +439,54 @@ export function createProspettoSheet(
     });
   }
 
-  const lastCantiereRowNum = ws.rowCount;
+  // -------------------------------------------------------------
+  // RIGA DEI SOSPESI
+  // Inserita nella tabella principale prima dei TOTALI:
+  // acquisti = somma di tutti i sospesi, altre colonne a zero
+  // -------------------------------------------------------------
+  const totSospesi = (artigiano.sospesi || []).reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
+
+  const sospesiRow = ws.addRow([
+    'SOSPESI',
+    '',
+    'FORNITURE IN ATTESA DI ATTRIBUZIONE (C/430000)',
+    0,
+    totSospesi,
+    0,
+    0
+  ]);
+  sospesiRow.height = 21;
+
+  sospesiRow.eachCell((cell, colNum) => {
+    cell.border = thinBlackBorder;
+    if (colNum === 1) {
+      cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFB45309' } };
+      cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    } else if (colNum <= 3) {
+      cell.font = { name: 'Calibri', size: 10, italic: true };
+      cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    } else {
+      cell.numFmt = currencyFormat;
+      cell.font = { name: 'Calibri', size: 10, bold: colNum === 5 };
+      cell.alignment = { vertical: 'middle', horizontal: 'right' };
+    }
+  });
+
+  const lastTableDataRowNum = sospesiRow.number;
 
   // -------------------------------------------------------------
-  // RIGA TOTALI CANTIERI
+  // RIGA TOTALI CANTIERI + SOSPESI
   // Riga in grassetto con bordo marcato riportante TOTALI e la somma
-  // delle colonne R.I., ACQUISTI, EMESSE e R.F.
+  // delle colonne R.I., ACQUISTI (cantieri + sospesi), EMESSE e R.F.
   // -------------------------------------------------------------
   const totaliRow = ws.addRow([
     '',
     '',
     'TOTALI',
-    { formula: `SUM(D${startDataRow}:D${lastCantiereRowNum})` },
-    { formula: `SUM(E${startDataRow}:E${lastCantiereRowNum})` },
-    { formula: `SUM(F${startDataRow}:F${lastCantiereRowNum})` },
-    { formula: `SUM(G${startDataRow}:G${lastCantiereRowNum})` },
+    { formula: `SUM(D${startDataRow}:D${lastTableDataRowNum})` },
+    { formula: `SUM(E${startDataRow}:E${lastTableDataRowNum})` },
+    { formula: `SUM(F${startDataRow}:F${lastTableDataRowNum})` },
+    { formula: `SUM(G${startDataRow}:G${lastTableDataRowNum})` },
   ]);
   totaliRow.height = 24;
   const totaliRowNum = totaliRow.number;
@@ -496,7 +529,6 @@ export function createProspettoSheet(
   ws.getCell(`C${quadHeaderRow.number}`).border = mediumBlackBorder;
 
   // Mastri Acquisti
-  const totSospesi = (artigiano.sospesi || []).reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
   const mastriAcq = artigiano.quadratura?.mastriniAcquistiDetails && artigiano.quadratura.mastriniAcquistiDetails.length > 0
     ? artigiano.quadratura.mastriniAcquistiDetails
     : [
@@ -618,7 +650,9 @@ export function createProspettoSheet(
   cellSbilVenHeader.border = mediumBlackBorder;
   cellSbilVenHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAEAEA' } };
 
-  // Row for Sbilancio Values on columns F & G
+  // Row for Sbilancio Values on columns F & G:
+  // Sbilancio Acquisti: TOTALE ACQUISTI (SEZIONE QUADRATURA) - TOTALE ACQUISTI (CANTIERI + SOSPESI) [col E di TOTALI]
+  // Sbilancio Vendite: TOTALE VENDITE (SEZIONE QUADRATURA) - TOTALE VENDITE DEI CANTIERI [col F di TOTALI]
   const sbilValuesRow = ws.addRow([
     '',
     '',
@@ -626,7 +660,7 @@ export function createProspettoSheet(
     '',
     '',
     { formula: `${totAcqCellRef}-E${totaliRowNum}` },
-    { formula: `${totVenCellRef}-(F${totaliRowNum}+G${totaliRowNum}-D${totaliRowNum})` }
+    { formula: `${totVenCellRef}-F${totaliRowNum}` }
   ]);
   sbilValuesRow.height = 24;
 

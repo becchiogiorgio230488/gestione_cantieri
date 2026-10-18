@@ -69,8 +69,7 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
   const totMastriVen = mastriVen.reduce((acc, m) => acc + (Number(m.amount) || 0), 0);
 
   const sbilancioAcq = Math.round((totMastriAcq - finalAcq) * 100) / 100;
-  const ricaviTabella = finalEme + finalRF - finalRI;
-  const sbilancioVen = Math.round((totMastriVen - ricaviTabella) * 100) / 100;
+  const sbilancioVen = Math.round((totMastriVen - finalEme) * 100) / 100;
 
   return (
     <div className="bg-white text-black min-h-screen p-6 sm:p-10 font-sans">
@@ -103,8 +102,8 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
         </div>
       </div>
 
-      {/* Official Sheet Layout mirroring esempio.png */}
-      <div className="max-w-5xl mx-auto bg-white border-2 border-black p-6 shadow-sm">
+      {/* Official Sheet Layout */}
+      <div className="max-w-5xl mx-auto bg-white border-2 border-slate-900 p-6 shadow-sm">
         {/* Banner with DITTA header */}
         <div className="border-b-2 border-slate-900 pb-3 mb-5 flex justify-between items-start">
           <div>
@@ -120,7 +119,7 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
           </div>
         </div>
 
-        {/* Tabella Principale Cantieri */}
+        {/* Tabella Principale Cantieri con riga SOSPESI */}
         <table className="w-full text-left border-collapse text-xs mb-6 border border-slate-400">
           <thead>
             <tr className="bg-slate-100 border-b-2 border-slate-900 font-bold uppercase text-[11px] text-slate-900">
@@ -155,13 +154,30 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
               </tr>
             ))}
 
-            {/* RIGA TOTALI CANTIERI: Riga in grassetto con bordo marcato riportante TOTALI */}
+            {/* RIGA DEI SOSPESI INSERITA NELLA TABELLA PRINCIPALE */}
+            <tr className="bg-amber-50/60 border-t border-b border-amber-300 font-semibold text-amber-950">
+              <td className="p-2 border border-slate-300 font-bold text-amber-900">
+                SOSPESI
+              </td>
+              <td className="p-2 border border-slate-300 text-slate-400 text-center">-</td>
+              <td className="p-2 border border-slate-300 italic text-slate-700">
+                FORNITURE IN ATTESA DI ATTRIBUZIONE (C/430000)
+              </td>
+              <td className="p-2 border border-slate-300 text-right font-mono text-slate-400">-</td>
+              <td className="p-2 border border-slate-300 text-right font-mono font-bold text-amber-900">
+                {formatAccountingCurrency(totSospesi)}
+              </td>
+              <td className="p-2 border border-slate-300 text-right font-mono text-slate-400">-</td>
+              <td className="p-2 border border-slate-300 text-right font-mono text-slate-400">-</td>
+            </tr>
+
+            {/* RIGA TOTALI: Riga in grassetto con bordo marcato riportante TOTALI e la somma di cantieri + sospesi */}
             <tr className="border-t-2 border-b-2 border-slate-900 bg-slate-100 font-black text-xs text-slate-950">
               <td className="p-2 border border-slate-400 text-right uppercase tracking-wider" colSpan={3}>
                 TOTALI
               </td>
               <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumRI)}</td>
-              <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumAcquisti)}</td>
+              <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(finalAcq)}</td>
               <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumEmesse)}</td>
               <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumRF)}</td>
             </tr>
@@ -235,8 +251,8 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
                   </div>
                 </div>
                 <div className="border-t border-slate-300 p-2 text-[10px] text-slate-600 bg-white leading-tight">
-                  <div>• Sbilancio Acquisti: Tot. Acquisti Mastri - (Acquisti Cantieri + Sospesi)</div>
-                  <div>• Sbilancio Ricavi: Tot. Vendite Mastri - (Emesse + RF - RI)</div>
+                  <div>• Sbilancio Acquisti = Totale Acquisti Quadratura - Totale Acquisti (Cantieri + Sospesi)</div>
+                  <div>• Sbilancio Ricavi = Totale Vendite Quadratura - Totale Vendite Cantieri</div>
                 </div>
               </div>
             </div>
