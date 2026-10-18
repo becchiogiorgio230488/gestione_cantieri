@@ -1360,6 +1360,7 @@ export default function App() {
     return (
       <PrintableView
         cantiere={currentCantiere}
+        dittaName={currentArtigiano?.name}
         onBack={() => setIsPrintCantiereView(false)}
       />
     );
@@ -1378,6 +1379,7 @@ export default function App() {
     return (
       <PrintableSospesiReport
         sospesi={currentArtigiano.sospesi || []}
+        dittaName={currentArtigiano.name}
         onBack={() => setIsPrintSospesiView(false)}
       />
     );

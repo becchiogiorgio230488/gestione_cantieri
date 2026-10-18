@@ -337,7 +337,7 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
               </button>
 
               <button
-                onClick={() => exportSospesiExcel(sospesi)}
+                onClick={() => exportSospesiExcel(sospesi, artigianoName)}
                 className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-xs font-semibold transition-all cursor-pointer"
                 title="Esporta foglio Excel della Scheda Sospesi"
               >

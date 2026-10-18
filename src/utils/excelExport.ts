@@ -69,123 +69,123 @@ export function buildCantiereDetailSheet(
     views: [{ showGridLines: true }]
   });
 
-  // 6 Columns as depicted in ESEMPIO 2.png
+  // 6 Columns: DATA DOC., N° DOC., TIPO DOC. / FORNITORE / CLIENTE, N./PROT, ACQUISTI, EMESSE
   ws.columns = [
-    { key: 'colA', width: 14 }, // DATA DOC.
-    { key: 'colB', width: 14 }, // N° DOC.
-    { key: 'colC', width: 44 }, // TIPO DOC./ FORNITORE / CLIENTE
+    { key: 'colA', width: 15 }, // DATA DOC.
+    { key: 'colB', width: 15 }, // N° DOC.
+    { key: 'colC', width: 44 }, // TIPO DOC. / FORNITORE / CLIENTE
     { key: 'colD', width: 14 }, // N./PROT
-    { key: 'colE', width: 16 }, // ACQUISTI
-    { key: 'colF', width: 16 }, // EMESSE
+    { key: 'colE', width: 18 }, // ACQUISTI
+    { key: 'colF', width: 18 }, // EMESSE
   ];
 
   // -------------------------------------------------------------
-  // HEADER BLOCK (Rows 1 to 4)
+  // HEADER BLOCKS (Rows 1 to 4)
+  // CANTIERE: [Nome Cantiere]
+  // DITTA: [Nome Ditta]
+  // CITTA': [Città]
+  // DEL: [Data] | ANNO: [Anno]
   // -------------------------------------------------------------
-  const indirizzoCantiere = (cantiere.address || '').toUpperCase();
+  const nomeCantiere = (cantiere.name || '').toUpperCase();
   const cittaCantiere = (cantiere.city || '').toUpperCase();
+  const indirizzoCantiere = (cantiere.address || '').toUpperCase();
   const clienteNome = (cantiere.client || cantiere.name || '').toUpperCase();
-  const finalDitta = (dittaName || 'SIRNA MASSIMO').toUpperCase();
+  const finalDitta = (dittaName || 'IMPRESA').toUpperCase();
+  const dataStampa = new Date().toLocaleDateString('it-IT');
+  const annoCantiere = cantiere.year || 2026;
 
-  // Row 1: CANTIERE: [Indirizzo] | DITTA
-  const row1 = ws.addRow(['CANTIERE:', indirizzoCantiere, '', '', 'DITTA', '']);
-  row1.height = 22;
+  // Row 1: CANTIERE: [Nome] | DITTA: [Nome Ditta]
+  const row1 = ws.addRow(['CANTIERE:', nomeCantiere, '', '', 'DITTA:', finalDitta]);
+  row1.height = 24;
   ws.mergeCells('B1:D1');
-  ws.mergeCells('E1:F1');
 
-  // Row 2: CITTA' [Città] | [Nome Ditta]
-  const row2 = ws.addRow(['CITTA\'', cittaCantiere, '', '', finalDitta, '']);
-  row2.height = 22;
+  // Row 2: CITTA': [Città - Indirizzo] | ANNO: [Anno]
+  const fullLoc = indirizzoCantiere ? `${cittaCantiere} - ${indirizzoCantiere}` : cittaCantiere;
+  const row2 = ws.addRow(['CITTA\':', fullLoc, '', '', 'ANNO:', annoCantiere]);
+  row2.height = 24;
   ws.mergeCells('B2:D2');
 
-  // Row 3: DEL: [Nome Cliente (es. FASANO PIERCARLO)]
-  const row3 = ws.addRow(['DEL:', clienteNome, '', '', '', '']);
-  row3.height = 22;
+  // Row 3: DEL: [Data] | COMMITTENTE: [Cliente]
+  const row3 = ws.addRow(['DEL:', dataStampa, '', '', 'COMMITTENTE:', clienteNome]);
+  row3.height = 24;
   ws.mergeCells('B3:D3');
 
-  // Row 4: ANNO [2026]
-  const row4 = ws.addRow(['ANNO', cantiere.year || 2026, '', '', '', '']);
-  row4.height = 24;
-  ws.mergeCells('B4:D4');
-
-  // Merge the DITTA box in E2:F4
-  ws.mergeCells('E2:F4');
-
-  // Style Header rows 1-4:
-  for (let r = 1; r <= 4; r++) {
+  // Style Header rows 1-3
+  for (let r = 1; r <= 3; r++) {
+    // Left label (col A)
     const cellA = ws.getCell(`A${r}`);
-    cellA.font = { name: 'Calibri', size: 10, bold: true };
+    cellA.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
     cellA.alignment = { vertical: 'middle', horizontal: 'center' };
     cellA.border = thinBlackBorder;
+    cellA.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
 
+    // Left value (col B:D)
     const cellB = ws.getCell(`B${r}`);
-    cellB.font = r === 4
-      ? { name: 'Calibri', size: 16, bold: true }
-      : { name: 'Calibri', size: 10, bold: true };
-    cellB.alignment = r === 4
-      ? { vertical: 'middle', horizontal: 'center' }
-      : { vertical: 'middle', horizontal: 'left' };
+    cellB.font = { name: 'Calibri', size: 10, bold: true };
+    cellB.alignment = { vertical: 'middle', horizontal: 'left' };
     cellB.border = thinBlackBorder;
-
     ws.getCell(`C${r}`).border = thinBlackBorder;
     ws.getCell(`D${r}`).border = thinBlackBorder;
+
+    // Right label (col E)
+    const cellE = ws.getCell(`E${r}`);
+    cellE.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
+    cellE.alignment = { vertical: 'middle', horizontal: 'center' };
+    cellE.border = thinBlackBorder;
+    cellE.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+
+    // Right value (col F)
+    const cellF = ws.getCell(`F${r}`);
+    cellF.font = { name: 'Calibri', size: 11, bold: true };
+    cellF.alignment = { vertical: 'middle', horizontal: 'center' };
+    cellF.border = thinBlackBorder;
   }
 
-  // DITTA label (E1:F1)
-  const cellE1 = ws.getCell('E1');
-  cellE1.font = { name: 'Calibri', size: 11, bold: true };
-  cellE1.alignment = { vertical: 'middle', horizontal: 'center' };
-  cellE1.border = mediumBlackBorder;
-  ws.getCell('F1').border = mediumBlackBorder;
-
-  // DITTA name box (E2:F4)
-  const cellDitta = ws.getCell('E2');
-  cellDitta.font = { name: 'Calibri', size: 13, bold: true };
-  cellDitta.alignment = { vertical: 'middle', horizontal: 'center' };
-  for (let r = 2; r <= 4; r++) {
-    ws.getCell(`E${r}`).border = mediumBlackBorder;
-    ws.getCell(`F${r}`).border = mediumBlackBorder;
-  }
+  // Row 4: Blank separator
+  const blankRow4 = ws.addRow(['', '', '', '', '', '']);
+  blankRow4.height = 10;
 
   // -------------------------------------------------------------
   // TABLE HEADERS (Row 5)
+  // DATA DOC. | N° DOC. | TIPO DOC. / FORNITORE / CLIENTE | N./PROT | ACQUISTI | EMESSE
   // -------------------------------------------------------------
   const tableHeaderRow = ws.addRow([
     'DATA DOC.',
     'N° DOC.',
-    'TIPO DOC./ FORNITORE / CLIENTE',
+    'TIPO DOC. / FORNITORE / CLIENTE',
     'N./PROT',
     'ACQUISTI',
     'EMESSE'
   ]);
   tableHeaderRow.height = 24;
   tableHeaderRow.eachCell((cell) => {
-    cell.font = { name: 'Calibri', size: 10, bold: true };
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
     cell.alignment = { vertical: 'middle', horizontal: 'center' };
     cell.border = mediumBlackBorder;
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAEAEA' } };
   });
 
   // -------------------------------------------------------------
-  // ROW 6: RIMANENZE INIZIALI
+  // ROW 6: RIMANENZE INIZIALI (R.I.)
   // -------------------------------------------------------------
   const ri = Number(cantiere.initialInventory) || 0;
   const riRow = ws.addRow([
     '',
     '',
-    'RIMANENZE INIZIALI',
+    'RIMANENZE INIZIALI (R.I.)',
     '',
     ri > 0 ? ri : 0,
     ''
   ]);
-  riRow.height = 20;
+  riRow.height = 21;
   riRow.eachCell((cell, colNum) => {
     cell.border = thinBlackBorder;
     if (colNum === 3) {
       cell.font = { name: 'Calibri', size: 10, bold: true };
-      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.alignment = { vertical: 'middle', horizontal: 'left' };
     } else if (colNum === 5) {
       cell.numFmt = currencyFormat;
-      cell.font = { name: 'Calibri', size: 10 };
+      cell.font = { name: 'Calibri', size: 10, bold: true };
       cell.alignment = { vertical: 'middle', horizontal: 'right' };
     }
   });
@@ -210,19 +210,22 @@ export function buildCantiereDetailSheet(
     row.eachCell((cell, colNum) => {
       cell.border = thinBlackBorder;
       cell.font = { name: 'Calibri', size: 10 };
-      if (colNum <= 2 || colNum === 4) {
+      if (colNum === 1 || colNum === 2 || colNum === 4) {
+        // Centered dates, document numbers, protocol
         cell.alignment = { vertical: 'middle', horizontal: 'center' };
       } else if (colNum === 3) {
+        // Left-aligned type / supplier / description
         cell.alignment = { vertical: 'middle', horizontal: 'left' };
       } else {
+        // Right-aligned currency
         cell.numFmt = currencyFormat;
         cell.alignment = { vertical: 'middle', horizontal: 'right' };
       }
     });
   }
 
-  // Ensure minimum empty rows for realistic worksheet grid like in ESEMPIO 2.png
-  const minRows = Math.max(movements.length, 12);
+  // Ensure minimum empty rows for a realistic grid
+  const minRows = Math.max(movements.length, 6);
   for (let i = movements.length; i < minRows; i++) {
     const emptyRow = ws.addRow(['', '', '', '', 0, 0]);
     emptyRow.height = 20;
@@ -239,7 +242,9 @@ export function buildCantiereDetailSheet(
   const lastMovRowNum = ws.rowCount;
 
   // -------------------------------------------------------------
-  // TOTALS ROWS (Matching ESEMPIO 2.png)
+  // RIGHE TOTALI FINALI:
+  // Riga 1: Totale senza RI (somma acquisti e vendite emesse dell'anno)
+  // Riga 2: Totale comprensivo di RI (somma totale inclusa rimanenza iniziale)
   // -------------------------------------------------------------
   const doubleTopBorder: Partial<ExcelJS.Borders> = {
     top: { style: 'double', color: { argb: 'FF000000' } },
@@ -255,7 +260,7 @@ export function buildCantiereDetailSheet(
     '',
     'Totale senza RI',
     { formula: `SUM(E${startMovRow}:E${lastMovRowNum})` },
-    0
+    { formula: `SUM(F${startMovRow}:F${lastMovRowNum})` }
   ]);
   totSenzaRIRow.height = 24;
 
@@ -264,10 +269,15 @@ export function buildCantiereDetailSheet(
     if (colNum === 4) {
       cell.font = { name: 'Calibri', size: 10, bold: true };
       cell.alignment = { vertical: 'middle', horizontal: 'right' };
-    } else if (colNum === 5) {
+    } else if (colNum >= 5) {
       cell.font = { name: 'Calibri', size: 10, bold: true };
       cell.numFmt = currencyFormat;
       cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF2F2F2' }
+      };
     }
   });
   const totSenzaRIRowNum = totSenzaRIRow.number;
@@ -279,51 +289,36 @@ export function buildCantiereDetailSheet(
     '',
     'Totale comprensivo di RI',
     { formula: `E${totSenzaRIRowNum}+E${riRowNum}` },
-    { formula: `SUM(F${startMovRow}:F${lastMovRowNum})` }
+    { formula: `F${totSenzaRIRowNum}` }
   ]);
   totCompRIRow.height = 24;
 
   totCompRIRow.eachCell((cell, colNum) => {
-    cell.border = thinBlackBorder;
+    cell.border = mediumBlackBorder;
     if (colNum === 4) {
       cell.font = { name: 'Calibri', size: 10, bold: true };
       cell.alignment = { vertical: 'middle', horizontal: 'right' };
-    } else if (colNum === 5) {
-      cell.font = { name: 'Calibri', size: 10, bold: true };
+    } else if (colNum >= 5) {
+      cell.font = { name: 'Calibri', size: 11, bold: true };
       cell.numFmt = currencyFormat;
       cell.alignment = { vertical: 'middle', horizontal: 'right' };
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: 'FFD9D9D9' }
+        fgColor: { argb: 'FFE6E6E6' }
       };
     }
   });
-  const totCompRIRowNum = totCompRIRow.number;
-
-  // Merge the right-hand column F across both totals rows (as shown in ESEMPIO 2.png)
-  ws.mergeCells(`F${totSenzaRIRowNum}:F${totCompRIRowNum}`);
-  const netCell = ws.getCell(`F${totSenzaRIRowNum}`);
-  netCell.value = { formula: `SUM(F${startMovRow}:F${lastMovRowNum})` };
-  netCell.font = { name: 'Calibri', size: 11, bold: true };
-  netCell.numFmt = currencyFormat;
-  netCell.alignment = { vertical: 'middle', horizontal: 'right' };
-  netCell.fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFD9D9D9' }
-  };
-  netCell.border = mediumBlackBorder;
-  ws.getCell(`F${totCompRIRowNum}`).border = mediumBlackBorder;
-
-  // Medium border for final total cell in E
-  ws.getCell(`E${totCompRIRowNum}`).border = mediumBlackBorder;
 
   return ws;
 }
 
 /**
- * Creates the exact worksheet mirroring the user's template (esempio.png)
+ * Creates the exact Prospetto Generale worksheet:
+ * - Header ditta: DITTA: [Nome Ditta]
+ * - Main table: NOME CLIENTE | CITTA' | INDIRIZZO | R.I. | ACQUISTI | EMESSE | R.F.
+ * - Totals row: TOTALI with sum of R.I., ACQUISTI, EMESSE, R.F.
+ * - Section Sospesi / Quadratura with Mastri Acquisti, Totale Acquisti, Mastri Vendite, Totale Vendite, Sbilancio
  */
 export function createProspettoSheet(
   workbook: ExcelJS.Workbook,
@@ -334,20 +329,49 @@ export function createProspettoSheet(
     views: [{ showGridLines: true }]
   });
 
-  // Column definitions matching esempio.png
+  // Column definitions matching guidelines:
+  // NOME CLIENTE | CITTA' | INDIRIZZO | R.I. | ACQUISTI | EMESSE | R.F.
   ws.columns = [
     { key: 'colA', width: 34 }, // NOME CLIENTE
     { key: 'colB', width: 22 }, // CITTA'
-    { key: 'colC', width: 36 }, // INDIRIZZO / DESCRIZIONE CONTI
+    { key: 'colC', width: 36 }, // INDIRIZZO
     { key: 'colD', width: 16 }, // R.I.
     { key: 'colE', width: 16 }, // ACQUISTI
     { key: 'colF', width: 16 }, // EMESSE
     { key: 'colG', width: 16 }, // R.F.
   ];
 
-  // 1. Header row
+  // -------------------------------------------------------------
+  // HEADER DITTA (Row 1-2)
+  // -------------------------------------------------------------
+  const dittaName = (artigiano.name || 'IMPRESA').toUpperCase();
+  const rowDitta = ws.addRow([`DITTA: ${dittaName}`, '', '', '', '', '', '']);
+  rowDitta.height = 26;
+  ws.mergeCells(`A1:G1`);
+  const cellDittaHeader = ws.getCell('A1');
+  cellDittaHeader.font = { name: 'Calibri', size: 13, bold: true, color: { argb: 'FF000000' } };
+  cellDittaHeader.alignment = { vertical: 'middle', horizontal: 'left' };
+
+  const rowSub = ws.addRow([
+    `PROSPETTO GENERALE CANTIERI • ANNO ${artigiano.year || 2026} • DATA: ${new Date().toLocaleDateString('it-IT')}`,
+    '', '', '', '', '', ''
+  ]);
+  rowSub.height = 18;
+  ws.mergeCells(`A2:G2`);
+  const cellSub = ws.getCell('A2');
+  cellSub.font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF555555' } };
+  cellSub.alignment = { vertical: 'middle', horizontal: 'left' };
+
+  // Blank row 3
+  const sepRow3 = ws.addRow(['', '', '', '', '', '', '']);
+  sepRow3.height = 8;
+
+  // -------------------------------------------------------------
+  // TABELLA PRINCIPALE CANTIERI (Row 4)
+  // Colonne: NOME CLIENTE | CITTA' | INDIRIZZO | R.I. | ACQUISTI | EMESSE | R.F.
+  // -------------------------------------------------------------
   const headerRow = ws.addRow([
-    'NOME CANTIERE',
+    'NOME CLIENTE',
     'CITTA\'',
     'INDIRIZZO',
     'R.I.',
@@ -358,7 +382,8 @@ export function createProspettoSheet(
   headerRow.height = 24;
   headerRow.eachCell((cell, colNum) => {
     cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
-    cell.border = thinBlackBorder;
+    cell.border = mediumBlackBorder;
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAEAEA' } };
     cell.alignment = {
       vertical: 'middle',
       horizontal: colNum <= 3 ? 'left' : 'right'
@@ -366,18 +391,19 @@ export function createProspettoSheet(
   });
 
   const cantieri = artigiano.cantieri || [];
-  const startDataRow = 2;
+  const startDataRow = 5;
 
-  // 2. Data rows for cantieri
+  // Data rows for cantieri
   for (const c of cantieri) {
     const t = calculateCantiereTotals(c);
     const ri = Number(c.initialInventory) || 0;
     const acq = t.totaleAcquisti;
     const eme = t.totaleEmesse;
     const rf = computeCantiereRF(ri, acq, eme);
+    const clientOrName = (c.client || c.name || '').toUpperCase();
 
     const row = ws.addRow([
-      (c.name || '').toUpperCase(),
+      clientOrName,
       (c.city || '').toUpperCase(),
       (c.address || '').toUpperCase(),
       ri,
@@ -399,108 +425,41 @@ export function createProspettoSheet(
     });
   }
 
-  // Ensure grid lines / empty rows like in esempio.png
+  // Ensure minimum rows
   const minRows = Math.max(cantieri.length, 2);
   for (let i = cantieri.length; i < minRows; i++) {
-    const emptyRow = ws.addRow(['', '', '', '', '', '', '']);
+    const emptyRow = ws.addRow(['', '', '', 0, 0, 0, 0]);
     emptyRow.height = 20;
-    emptyRow.eachCell((cell) => {
+    emptyRow.eachCell((cell, colNum) => {
       cell.border = thinBlackBorder;
+      if (colNum >= 4) {
+        cell.numFmt = currencyFormat;
+        cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      }
     });
   }
 
-  // 4. Section SOSPESI
-  const totSospesi = (artigiano.sospesi || []).reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
+  const lastCantiereRowNum = ws.rowCount;
 
-  // Sospesi Row 1
-  const sospRow1 = ws.addRow([
-    '',
-    'SOSPESI',
-    'C/430000 ACQUISTI MERCI',
-    0,
-    totSospesi,
-    0,
-    0
-  ]);
-  sospRow1.height = 20;
-  sospRow1.eachCell((cell, colNum) => {
-    cell.border = thinBlackBorder;
-    if (colNum === 2) {
-      cell.font = { name: 'Calibri', size: 10, bold: true, underline: true };
-      cell.alignment = { vertical: 'middle', horizontal: 'left' };
-    } else if (colNum === 3) {
-      cell.font = { name: 'Calibri', size: 10 };
-      cell.alignment = { vertical: 'middle', horizontal: 'right' };
-    } else if (colNum >= 4) {
-      cell.numFmt = currencyFormat;
-      cell.font = { name: 'Calibri', size: 10 };
-      cell.alignment = { vertical: 'middle', horizontal: 'right' };
-    }
-  });
-
-  // Sospesi Row 2
-  const sospRow2 = ws.addRow([
-    '',
-    '',
-    'C/441120 LAVORAZIONI DI TERZI',
-    0,
-    0,
-    0,
-    0
-  ]);
-  sospRow2.height = 20;
-  sospRow2.eachCell((cell, colNum) => {
-    cell.border = thinBlackBorder;
-    if (colNum === 3) {
-      cell.font = { name: 'Calibri', size: 10 };
-      cell.alignment = { vertical: 'middle', horizontal: 'right' };
-    } else if (colNum >= 4) {
-      cell.numFmt = currencyFormat;
-      cell.font = { name: 'Calibri', size: 10 };
-      cell.alignment = { vertical: 'middle', horizontal: 'right' };
-    }
-  });
-
-  // Sospesi Row 3
-  const sospRow3 = ws.addRow([
-    '',
-    '',
-    'C/450200 LOCAZIONI PASSIVE ALTRI BENI',
-    0,
-    0,
-    0,
-    0
-  ]);
-  sospRow3.height = 20;
-  sospRow3.eachCell((cell, colNum) => {
-    cell.border = thinBlackBorder;
-    if (colNum === 3) {
-      cell.font = { name: 'Calibri', size: 10 };
-      cell.alignment = { vertical: 'middle', horizontal: 'right' };
-    } else if (colNum >= 4) {
-      cell.numFmt = currencyFormat;
-      cell.font = { name: 'Calibri', size: 10 };
-      cell.alignment = { vertical: 'middle', horizontal: 'right' };
-    }
-  });
-
-  const lastSospesiRowNum = sospRow3.number;
-
-  // 5. Row TOTALI
+  // -------------------------------------------------------------
+  // RIGA TOTALI CANTIERI
+  // Riga in grassetto con bordo marcato riportante TOTALI e la somma
+  // delle colonne R.I., ACQUISTI, EMESSE e R.F.
+  // -------------------------------------------------------------
   const totaliRow = ws.addRow([
     '',
     '',
     'TOTALI',
-    { formula: `SUM(D${startDataRow}:D${lastSospesiRowNum})` },
-    { formula: `SUM(E${startDataRow}:E${lastSospesiRowNum})` },
-    { formula: `SUM(F${startDataRow}:F${lastSospesiRowNum})` },
-    { formula: `SUM(G${startDataRow}:G${lastSospesiRowNum})` },
+    { formula: `SUM(D${startDataRow}:D${lastCantiereRowNum})` },
+    { formula: `SUM(E${startDataRow}:E${lastCantiereRowNum})` },
+    { formula: `SUM(F${startDataRow}:F${lastCantiereRowNum})` },
+    { formula: `SUM(G${startDataRow}:G${lastCantiereRowNum})` },
   ]);
-  totaliRow.height = 22;
+  totaliRow.height = 24;
   const totaliRowNum = totaliRow.number;
 
   totaliRow.eachCell((cell, colNum) => {
-    cell.border = thinBlackBorder;
+    cell.border = mediumBlackBorder;
     cell.font = { name: 'Calibri', size: 10, bold: true };
     if (colNum === 3) {
       cell.alignment = { vertical: 'middle', horizontal: 'right' };
@@ -517,35 +476,44 @@ export function createProspettoSheet(
 
   // Separator row
   const sepRow = ws.addRow(['', '', '', '', '', '', '']);
-  sepRow.height = 12;
+  sepRow.height = 16;
 
-  // 6. Section QUADRATURA
-  const quadHeaderRow = ws.addRow(['QUADRATURA', '', '', '', '', '', '']);
-  quadHeaderRow.height = 22;
-  ws.mergeCells(`A${quadHeaderRow.number}:B${quadHeaderRow.number}`);
+  // -------------------------------------------------------------
+  // SEZIONE SOSPESI / QUADRATURA
+  // Sotto la tabella dei cantieri, includere la sezione QUADRATURA / SOSPESI.
+  // Tabella sintetica con suddivisione per mastro o categoria con TOTALE ACQUISTI.
+  // Sezione Vendite con TOTALE VENDITE e calcolo SBILANCIO ACQUISTI e SBILANCIO RICAVI.
+  // -------------------------------------------------------------
+  const quadHeaderRow = ws.addRow(['SEZIONE QUADRATURA / SOSPESI', '', '', '', '', '', '']);
+  quadHeaderRow.height = 24;
+  ws.mergeCells(`A${quadHeaderRow.number}:C${quadHeaderRow.number}`);
   const quadCell = ws.getCell(`A${quadHeaderRow.number}`);
-  quadCell.font = { name: 'Calibri', size: 10, bold: true };
-  quadCell.alignment = { vertical: 'middle', horizontal: 'center' };
-  quadCell.border = thinBlackBorder;
-  ws.getCell(`B${quadHeaderRow.number}`).border = thinBlackBorder;
+  quadCell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF000000' } };
+  quadCell.alignment = { vertical: 'middle', horizontal: 'left' };
+  quadCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAEAEA' } };
+  quadCell.border = mediumBlackBorder;
+  ws.getCell(`B${quadHeaderRow.number}`).border = mediumBlackBorder;
+  ws.getCell(`C${quadHeaderRow.number}`).border = mediumBlackBorder;
 
-  // Mastrini Acquisti
+  // Mastri Acquisti
+  const totSospesi = (artigiano.sospesi || []).reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
   const mastriAcq = artigiano.quadratura?.mastriniAcquistiDetails && artigiano.quadratura.mastriniAcquistiDetails.length > 0
     ? artigiano.quadratura.mastriniAcquistiDetails
     : [
-        { code: 'C/430000', description: 'ACQUISTI MERCI', amount: 0 },
+        { code: 'C/430000', description: 'ACQUISTI MERCI', amount: totSospesi },
         { code: 'C/441120', description: 'LAVORAZIONI DI TERZI', amount: 0 },
         { code: 'C/450200', description: 'LOCAZIONI PASSIVE ALTRI BENI', amount: 0 },
       ];
 
   const firstAcqRowNum = quadHeaderRow.number + 1;
   for (const m of mastriAcq) {
-    const row = ws.addRow([`${m.code || ''} ${m.description || ''}`.trim(), '', m.amount || 0, '', '', '', '']);
+    const label = `${m.code || ''} ${m.description || ''}`.trim();
+    const row = ws.addRow([label, '', m.amount || 0, '', '', '', '']);
     row.height = 20;
     ws.mergeCells(`A${row.number}:B${row.number}`);
     const cellA = ws.getCell(`A${row.number}`);
     cellA.font = { name: 'Calibri', size: 10, bold: true };
-    cellA.alignment = { vertical: 'middle', horizontal: 'center' };
+    cellA.alignment = { vertical: 'middle', horizontal: 'left' };
     cellA.border = thinBlackBorder;
     ws.getCell(`B${row.number}`).border = thinBlackBorder;
 
@@ -563,22 +531,24 @@ export function createProspettoSheet(
   ws.mergeCells(`A${totAcqRow.number}:B${totAcqRow.number}`);
   const cellTotAcq = ws.getCell(`A${totAcqRow.number}`);
   cellTotAcq.font = { name: 'Calibri', size: 10, bold: true };
-  cellTotAcq.alignment = { vertical: 'middle', horizontal: 'center' };
-  cellTotAcq.border = thinBlackBorder;
-  ws.getCell(`B${totAcqRow.number}`).border = thinBlackBorder;
+  cellTotAcq.alignment = { vertical: 'middle', horizontal: 'left' };
+  cellTotAcq.border = mediumBlackBorder;
+  cellTotAcq.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+  ws.getCell(`B${totAcqRow.number}`).border = mediumBlackBorder;
 
   const cellTotAcqVal = ws.getCell(`C${totAcqRow.number}`);
   cellTotAcqVal.numFmt = currencyFormat;
   cellTotAcqVal.font = { name: 'Calibri', size: 10, bold: true };
   cellTotAcqVal.alignment = { vertical: 'middle', horizontal: 'right' };
-  cellTotAcqVal.border = thinBlackBorder;
+  cellTotAcqVal.border = mediumBlackBorder;
+  cellTotAcqVal.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
   const totAcqCellRef = `C${totAcqRow.number}`;
 
   // Blank row
-  const blankRow = ws.addRow(['', '', '', '', '', '', '']);
-  blankRow.height = 14;
+  const blankRowQuad = ws.addRow(['', '', '', '', '', '', '']);
+  blankRowQuad.height = 10;
 
-  // Mastrini Vendite
+  // Mastri Vendite
   const mastriVen = artigiano.quadratura?.mastriniVenditeDetails && artigiano.quadratura.mastriniVenditeDetails.length > 0
     ? artigiano.quadratura.mastriniVenditeDetails
     : [
@@ -587,14 +557,15 @@ export function createProspettoSheet(
         { code: 'C/310750', description: 'ALTRI RICAVI', amount: 0 },
       ];
 
-  const firstVenRowNum = blankRow.number + 1;
+  const firstVenRowNum = blankRowQuad.number + 1;
   for (const m of mastriVen) {
-    const row = ws.addRow([`${m.code || ''} ${m.description || ''}`.trim(), '', m.amount || 0, '', '', '', '']);
+    const label = `${m.code || ''} ${m.description || ''}`.trim();
+    const row = ws.addRow([label, '', m.amount || 0, '', '', '', '']);
     row.height = 20;
     ws.mergeCells(`A${row.number}:B${row.number}`);
     const cellA = ws.getCell(`A${row.number}`);
     cellA.font = { name: 'Calibri', size: 10, bold: true };
-    cellA.alignment = { vertical: 'middle', horizontal: 'center' };
+    cellA.alignment = { vertical: 'middle', horizontal: 'left' };
     cellA.border = thinBlackBorder;
     ws.getCell(`B${row.number}`).border = thinBlackBorder;
 
@@ -606,7 +577,7 @@ export function createProspettoSheet(
   }
   const lastVenRowNum = firstVenRowNum + mastriVen.length - 1;
 
-  // Row TOTALE VENDITE with SBILANCIO ACQUISTI and SBILANCIO RICAVI headers on columns F & G
+  // Row TOTALE VENDITE with SBILANCIO ACQUISTI and SBILANCIO RICAVI headers on F & G
   const totVenRow = ws.addRow([
     'TOTALE VENDITE',
     '',
@@ -621,27 +592,31 @@ export function createProspettoSheet(
 
   const cellTotVen = ws.getCell(`A${totVenRow.number}`);
   cellTotVen.font = { name: 'Calibri', size: 10, bold: true };
-  cellTotVen.alignment = { vertical: 'middle', horizontal: 'center' };
-  cellTotVen.border = thinBlackBorder;
-  ws.getCell(`B${totVenRow.number}`).border = thinBlackBorder;
+  cellTotVen.alignment = { vertical: 'middle', horizontal: 'left' };
+  cellTotVen.border = mediumBlackBorder;
+  cellTotVen.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+  ws.getCell(`B${totVenRow.number}`).border = mediumBlackBorder;
 
   const cellTotVenVal = ws.getCell(`C${totVenRow.number}`);
   cellTotVenVal.numFmt = currencyFormat;
   cellTotVenVal.font = { name: 'Calibri', size: 10, bold: true };
   cellTotVenVal.alignment = { vertical: 'middle', horizontal: 'right' };
-  cellTotVenVal.border = thinBlackBorder;
+  cellTotVenVal.border = mediumBlackBorder;
+  cellTotVenVal.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
   const totVenCellRef = `C${totVenRow.number}`;
 
-  // Style Sbilancio headers on F & G (medium border, centered, bold)
+  // Style Sbilancio headers on F & G
   const cellSbilAcqHeader = ws.getCell(`F${totVenRow.number}`);
   cellSbilAcqHeader.font = { name: 'Calibri', size: 10, bold: true };
   cellSbilAcqHeader.alignment = { vertical: 'middle', horizontal: 'center' };
   cellSbilAcqHeader.border = mediumBlackBorder;
+  cellSbilAcqHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAEAEA' } };
 
   const cellSbilVenHeader = ws.getCell(`G${totVenRow.number}`);
   cellSbilVenHeader.font = { name: 'Calibri', size: 10, bold: true };
   cellSbilVenHeader.alignment = { vertical: 'middle', horizontal: 'center' };
   cellSbilVenHeader.border = mediumBlackBorder;
+  cellSbilVenHeader.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAEAEA' } };
 
   // Row for Sbilancio Values on columns F & G
   const sbilValuesRow = ws.addRow([
@@ -651,28 +626,29 @@ export function createProspettoSheet(
     '',
     '',
     { formula: `${totAcqCellRef}-E${totaliRowNum}` },
-    { formula: `${totVenCellRef}-F${totaliRowNum}` }
+    { formula: `${totVenCellRef}-(F${totaliRowNum}+G${totaliRowNum}-D${totaliRowNum})` }
   ]);
   sbilValuesRow.height = 24;
 
   const cellSbilAcqVal = ws.getCell(`F${sbilValuesRow.number}`);
   cellSbilAcqVal.numFmt = currencyFormat;
-  cellSbilAcqVal.font = { name: 'Calibri', size: 10, bold: true };
+  cellSbilAcqVal.font = { name: 'Calibri', size: 11, bold: true };
   cellSbilAcqVal.alignment = { vertical: 'middle', horizontal: 'center' };
   cellSbilAcqVal.border = mediumBlackBorder;
+  cellSbilAcqVal.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
 
   const cellSbilVenVal = ws.getCell(`G${sbilValuesRow.number}`);
   cellSbilVenVal.numFmt = currencyFormat;
-  cellSbilVenVal.font = { name: 'Calibri', size: 10, bold: true };
+  cellSbilVenVal.font = { name: 'Calibri', size: 11, bold: true };
   cellSbilVenVal.alignment = { vertical: 'middle', horizontal: 'center' };
   cellSbilVenVal.border = mediumBlackBorder;
+  cellSbilVenVal.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
 
   return ws;
 }
 
 /**
  * Export single cantiere to Excel
- * Produces the exact sheet requested in ESEMPIO 2.png
  */
 export async function exportSingleCantiereExcel(
   cantiere: Cantiere,
@@ -682,7 +658,6 @@ export async function exportSingleCantiereExcel(
   workbook.creator = 'Studio Contabile';
   workbook.created = new Date();
 
-  // Create single cantiere sheet exactly as in ESEMPIO 2.png
   buildCantiereDetailSheet(workbook, cantiere, dittaName, cantiere.name || 'Scheda Cantiere');
 
   const safeClient = (cantiere.client || cantiere.name || 'CANTIERE')
@@ -694,7 +669,6 @@ export async function exportSingleCantiereExcel(
 
 /**
  * Export Prospetto Generale for an artisan or cantieri list
- * Generates the Prospetto sheet from esempio.png plus all individual cantiere sheets from ESEMPIO 2.png
  */
 export async function exportProspettoGeneraleExcel(
   target: Artigiano | Cantiere[],
@@ -722,10 +696,10 @@ export async function exportProspettoGeneraleExcel(
     artigiano = target;
   }
 
-  // Foglio 1: Z-PROSPETTO CANTIERI esattamente come in esempio.png
+  // Foglio 1: Z-PROSPETTO CANTIERI
   createProspettoSheet(workbook, artigiano, 'Z-PROSPETTO CANTIERI');
 
-  // Fogli di dettaglio per ciascun cantiere esattamente come in ESEMPIO 2.png
+  // Fogli di dettaglio per ciascun cantiere
   const usedNames = new Set<string>(['Z-PROSPETTO CANTIERI']);
   (artigiano.cantieri || []).forEach((c, idx) => {
     let name = (c.name || `Cantiere ${idx + 1}`).replace(/[:\\/?*[\]]/g, '').slice(0, 25);
@@ -741,7 +715,11 @@ export async function exportProspettoGeneraleExcel(
 }
 
 /**
- * Export Sospesi sheet to Excel
+ * Export Sospesi sheet to Excel matching exact guidelines:
+ * - Header ditta: DITTA: [Nome Ditta] and SCHEDA SOSPESI / FORNITURE IN ATTESA
+ * - Columns: DATA | N. FATTURA | FORNITORE | NS. PROT. | IMPORTO | DESCRIZIONE
+ * - Alignments: centered for Data, N. Fattura, Prot; right for Importo; left for Fornitore/Descrizione
+ * - Totals row: TOTALE: with sum of column IMPORTO, bold, double border
  */
 export async function exportSospesiExcel(sospesi: SospesoItem[], artigianoName?: string): Promise<void> {
   const workbook = new ExcelJS.Workbook();
@@ -752,63 +730,130 @@ export async function exportSospesiExcel(sospesi: SospesoItem[], artigianoName?:
     views: [{ showGridLines: true }]
   });
 
+  // 6 Columns: DATA | N. FATTURA | FORNITORE | NS. PROT. | IMPORTO | DESCRIZIONE
   ws.columns = [
-    { key: 'colA', width: 14 }, // DATA DOC.
-    { key: 'colB', width: 16 }, // N° DOC.
-    { key: 'colC', width: 36 }, // TIPO DOC. / FORNITORE
-    { key: 'colD', width: 24 }, // CLIENTE
-    { key: 'colE', width: 16 }, // N./PROT
-    { key: 'colF', width: 18 }, // IMPORTO (€)
-    { key: 'colG', width: 40 }, // NOTE PER IL CLIENTE
+    { key: 'colA', width: 14 }, // DATA
+    { key: 'colB', width: 16 }, // N. FATTURA
+    { key: 'colC', width: 34 }, // FORNITORE
+    { key: 'colD', width: 16 }, // NS. PROT.
+    { key: 'colE', width: 18 }, // IMPORTO
+    { key: 'colF', width: 42 }, // DESCRIZIONE
   ];
 
+  // -------------------------------------------------------------
+  // HEADER DITTA (Rows 1 to 3)
+  // -------------------------------------------------------------
+  const ditta = (artigianoName || 'IMPRESA').toUpperCase();
+  const row1 = ws.addRow([`DITTA: ${ditta}`, '', '', '', '', '']);
+  row1.height = 24;
+  ws.mergeCells('A1:F1');
+  const cellA1 = ws.getCell('A1');
+  cellA1.font = { name: 'Calibri', size: 12, bold: true, color: { argb: 'FF000000' } };
+  cellA1.alignment = { vertical: 'middle', horizontal: 'left' };
+
+  const row2 = ws.addRow(['SCHEDA SOSPESI / FORNITURE IN ATTESA', '', '', '', '', '']);
+  row2.height = 20;
+  ws.mergeCells('A2:F2');
+  const cellA2 = ws.getCell('A2');
+  cellA2.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF333333' } };
+  cellA2.alignment = { vertical: 'middle', horizontal: 'left' };
+
+  const row3 = ws.addRow([`Data emissione: ${new Date().toLocaleDateString('it-IT')}`, '', '', '', '', '']);
+  row3.height = 16;
+  ws.mergeCells('A3:F3');
+  const cellA3 = ws.getCell('A3');
+  cellA3.font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF666666' } };
+  cellA3.alignment = { vertical: 'middle', horizontal: 'left' };
+
+  const rowSep = ws.addRow(['', '', '', '', '', '']);
+  rowSep.height = 8;
+
+  // -------------------------------------------------------------
+  // TABLE HEADERS (Row 5)
+  // DATA | N. FATTURA | FORNITORE | NS. PROT. | IMPORTO | DESCRIZIONE
+  // -------------------------------------------------------------
   const header = ws.addRow([
-    'DATA DOC.',
-    'N° DOC.',
-    'TIPO DOC. / FORNITORE',
-    'CLIENTE',
-    'N./PROT',
-    'IMPORTO (€)',
-    'NOTE PER IL CLIENTE',
+    'DATA',
+    'N. FATTURA',
+    'FORNITORE',
+    'NS. PROT.',
+    'IMPORTO',
+    'DESCRIZIONE',
   ]);
   header.height = 24;
-  header.eachCell((cell) => {
-    cell.font = { name: 'Calibri', size: 10, bold: true };
-    cell.border = thinBlackBorder;
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+  header.eachCell((cell, colNum) => {
+    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
+    cell.border = mediumBlackBorder;
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAEAEA' } };
+    if (colNum === 1 || colNum === 2 || colNum === 4) {
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    } else if (colNum === 5) {
+      cell.alignment = { vertical: 'middle', horizontal: 'right' };
+    } else {
+      cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    }
   });
 
+  const startDataRow = 6;
   sospesi.forEach((s) => {
-    const supplierFull = s.ddtNumber ? `${s.supplier} (${s.ddtNumber})` : s.supplier;
+    const supplierFull = s.ddtNumber ? `${s.supplier} (DDT: ${s.ddtNumber})` : s.supplier;
+    const desc = s.description || s.customerNote || '';
     const row = ws.addRow([
       formatDateItalian(s.date),
-      s.docNumber,
-      supplierFull,
-      s.client || '',
+      s.docNumber || '',
+      supplierFull || '',
       s.protocol || '',
       Number(s.amount) || 0,
-      s.customerNote || '',
+      desc,
     ]);
     row.height = 20;
     row.eachCell((cell, colNum) => {
       cell.border = thinBlackBorder;
       cell.font = { name: 'Calibri', size: 10 };
-      if (colNum === 6) {
+      if (colNum === 1 || colNum === 2 || colNum === 4) {
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      } else if (colNum === 5) {
         cell.numFmt = currencyFormat;
-        cell.alignment = { horizontal: 'right' };
+        cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      } else {
+        cell.alignment = { vertical: 'middle', horizontal: 'left' };
       }
     });
   });
 
-  const totSospesi = sospesi.reduce((acc, s) => acc + (Number(s.amount) || 0), 0);
-  const totRow = ws.addRow(['', '', '', '', 'TOTALE MATERIALI SOSPESI:', totSospesi, '']);
-  totRow.height = 22;
+  const lastDataRow = ws.rowCount;
+
+  // -------------------------------------------------------------
+  // RIGA TOTALE
+  // In fondo alla tabella, riga in grassetto con TOTALE: e la somma della colonna IMPORTO
+  // -------------------------------------------------------------
+  const doubleTopBorder: Partial<ExcelJS.Borders> = {
+    top: { style: 'double', color: { argb: 'FF000000' } },
+    left: { style: 'thin', color: { argb: 'FF000000' } },
+    bottom: { style: 'medium', color: { argb: 'FF000000' } },
+    right: { style: 'thin', color: { argb: 'FF000000' } },
+  };
+
+  const totRow = ws.addRow([
+    '',
+    '',
+    '',
+    'TOTALE:',
+    { formula: `SUM(E${startDataRow}:E${lastDataRow})` },
+    ''
+  ]);
+  totRow.height = 24;
+
   totRow.eachCell((cell, colNum) => {
-    cell.border = thinBlackBorder;
-    cell.font = { name: 'Calibri', size: 10, bold: true };
-    if (colNum === 6) {
+    cell.border = doubleTopBorder;
+    if (colNum === 4) {
+      cell.font = { name: 'Calibri', size: 10, bold: true };
+      cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+    } else if (colNum === 5) {
       cell.numFmt = currencyFormat;
-      cell.alignment = { horizontal: 'right' };
+      cell.font = { name: 'Calibri', size: 11, bold: true };
+      cell.alignment = { vertical: 'middle', horizontal: 'right' };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
     }
   });

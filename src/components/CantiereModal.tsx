@@ -5,35 +5,47 @@ import { getTodayISODate } from '../utils/calculations';
 
 interface CantiereModalProps {
   cantiereToEdit?: Cantiere | null;
+  initialData?: Partial<Cantiere>;
+  zIndex?: string;
   onClose: () => void;
   onSave: (cantiereData: Partial<Cantiere>) => void;
 }
 
 export const CantiereModal: React.FC<CantiereModalProps> = ({
   cantiereToEdit,
+  initialData,
+  zIndex = 'z-50',
   onClose,
   onSave,
 }) => {
   const isEditing = Boolean(cantiereToEdit);
 
-  const [name, setName] = useState(cantiereToEdit?.name || '');
-  const [city, setCity] = useState(cantiereToEdit?.city || '');
-  const [address, setAddress] = useState(cantiereToEdit?.address || '');
-  const date = cantiereToEdit?.date || getTodayISODate();
-  const [year, setYear] = useState<number>(cantiereToEdit?.year || 2026);
+  const [name, setName] = useState(cantiereToEdit?.name || initialData?.name || '');
+  const [city, setCity] = useState(cantiereToEdit?.city || initialData?.city || '');
+  const [address, setAddress] = useState(cantiereToEdit?.address || initialData?.address || '');
+  const date = cantiereToEdit?.date || initialData?.date || getTodayISODate();
+  const [year, setYear] = useState<number>(cantiereToEdit?.year || initialData?.year || 2026);
   const [initialInventory, setInitialInventory] = useState<string>(
-    cantiereToEdit ? cantiereToEdit.initialInventory.toString() : '0'
+    cantiereToEdit
+      ? cantiereToEdit.initialInventory.toString()
+      : initialData?.initialInventory !== undefined
+      ? initialData.initialInventory.toString()
+      : '0'
   );
   const [finalInventory, setFinalInventory] = useState<string>(
-    cantiereToEdit ? cantiereToEdit.finalInventory.toString() : '0'
+    cantiereToEdit
+      ? cantiereToEdit.finalInventory.toString()
+      : initialData?.finalInventory !== undefined
+      ? initialData.finalInventory.toString()
+      : '0'
   );
   const [category, setCategory] = useState<CantiereCategory>(
-    cantiereToEdit?.category || 'idraulico'
+    cantiereToEdit?.category || initialData?.category || 'idraulico'
   );
   const [status, setStatus] = useState<CantiereStatus>(
-    cantiereToEdit?.status || 'attivo'
+    cantiereToEdit?.status || initialData?.status || 'attivo'
   );
-  const [notes, setNotes] = useState(cantiereToEdit?.notes || '');
+  const [notes, setNotes] = useState(cantiereToEdit?.notes || initialData?.notes || '');
   const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -68,7 +80,7 @@ export const CantiereModal: React.FC<CantiereModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div className={`fixed inset-0 ${zIndex} bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto`}>
       <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full flex flex-col shadow-2xl overflow-hidden animate-fadeIn my-auto">
         {/* Header */}
         <div className="px-5 py-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between">

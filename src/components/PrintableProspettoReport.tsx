@@ -105,112 +105,91 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
 
       {/* Official Sheet Layout mirroring esempio.png */}
       <div className="max-w-5xl mx-auto bg-white border-2 border-black p-6 shadow-sm">
-        {/* Banner */}
-        <div className="border-b-2 border-black pb-3 mb-4 flex justify-between items-end">
+        {/* Banner with DITTA header */}
+        <div className="border-b-2 border-slate-900 pb-3 mb-5 flex justify-between items-start">
           <div>
-            <h1 className="text-xl font-black tracking-tight text-black uppercase">
-              PROSPETTO CANTIERI • {artigiano.name.toUpperCase()}
+            <div className="text-sm font-bold text-slate-900 uppercase tracking-wide">
+              DITTA: <span className="text-base font-extrabold text-slate-950">{artigiano.name.toUpperCase()}</span>
+            </div>
+            <h1 className="text-lg font-black tracking-tight text-slate-900 uppercase mt-0.5">
+              PROSPETTO GENERALE CANTIERI • ANNO {artigiano.year || 2026}
             </h1>
           </div>
           <div className="text-right text-xs text-slate-600 font-mono">
-            <div>Data: {new Date().toLocaleDateString('it-IT')}</div>
+            <div>Data emissione: {new Date().toLocaleDateString('it-IT')}</div>
           </div>
         </div>
 
-        {/* Table exactly as in esempio.png */}
-        <table className="w-full text-left border-collapse text-xs mb-4 border border-black">
+        {/* Tabella Principale Cantieri */}
+        <table className="w-full text-left border-collapse text-xs mb-6 border border-slate-400">
           <thead>
-            <tr className="bg-white border-b-2 border-black font-bold uppercase text-[11px]">
-              <th className="p-2 border border-black w-[28%]">NOME CANTIERE</th>
-              <th className="p-2 border border-black w-[14%]">CITTA'</th>
-              <th className="p-2 border border-black w-[24%]">INDIRIZZO</th>
-              <th className="p-2 border border-black text-right w-[9%]">R.I.</th>
-              <th className="p-2 border border-black text-right w-[9%]">ACQUISTI</th>
-              <th className="p-2 border border-black text-right w-[9%]">EMESSE</th>
-              <th className="p-2 border border-black text-right w-[9%]">R.F.</th>
+            <tr className="bg-slate-100 border-b-2 border-slate-900 font-bold uppercase text-[11px] text-slate-900">
+              <th className="p-2 border border-slate-400 w-[26%]">NOME CLIENTE</th>
+              <th className="p-2 border border-slate-400 w-[14%]">CITTA'</th>
+              <th className="p-2 border border-slate-400 w-[24%]">INDIRIZZO</th>
+              <th className="p-2 border border-slate-400 text-right w-[9%]">R.I.</th>
+              <th className="p-2 border border-slate-400 text-right w-[9%]">ACQUISTI</th>
+              <th className="p-2 border border-slate-400 text-right w-[9%]">EMESSE</th>
+              <th className="p-2 border border-slate-400 text-right w-[9%]">R.F.</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.c.id}>
-                <td className="p-2 border border-black font-bold text-black">{r.name}</td>
-                <td className="p-2 border border-black">{r.city}</td>
-                <td className="p-2 border border-black">{r.address}</td>
-                <td className="p-2 border border-black text-right font-mono">{formatAccountingCurrency(r.ri)}</td>
-                <td className="p-2 border border-black text-right font-mono font-semibold">{formatAccountingCurrency(r.acquisti)}</td>
-                <td className="p-2 border border-black text-right font-mono font-semibold">{formatAccountingCurrency(r.emesse)}</td>
-                <td className="p-2 border border-black text-right font-mono font-semibold">{formatAccountingCurrency(r.rf)}</td>
+              <tr key={r.c.id} className="hover:bg-slate-50/50">
+                <td className="p-2 border border-slate-300 font-bold text-slate-950">
+                  {r.c.client ? (
+                    <div>
+                      <span>{r.c.client.toUpperCase()}</span>
+                      <span className="block text-[10px] font-normal text-slate-500">{r.name}</span>
+                    </div>
+                  ) : (
+                    r.name
+                  )}
+                </td>
+                <td className="p-2 border border-slate-300 text-slate-800">{r.city}</td>
+                <td className="p-2 border border-slate-300 text-slate-800">{r.address}</td>
+                <td className="p-2 border border-slate-300 text-right font-mono text-slate-900">{formatAccountingCurrency(r.ri)}</td>
+                <td className="p-2 border border-slate-300 text-right font-mono font-semibold text-slate-900">{formatAccountingCurrency(r.acquisti)}</td>
+                <td className="p-2 border border-slate-300 text-right font-mono font-semibold text-slate-900">{formatAccountingCurrency(r.emesse)}</td>
+                <td className="p-2 border border-slate-300 text-right font-mono font-semibold text-slate-900">{formatAccountingCurrency(r.rf)}</td>
               </tr>
             ))}
 
-            {/* Separator row */}
-            <tr className="h-2">
-              <td className="border border-black"></td>
-              <td className="border border-black"></td>
-              <td className="border border-black"></td>
-              <td className="border border-black"></td>
-              <td className="border border-black"></td>
-              <td className="border border-black"></td>
-              <td className="border border-black"></td>
-            </tr>
-
-            {/* Section SOSPESI */}
-            <tr>
-              <td className="p-1.5 border border-black"></td>
-              <td className="p-1.5 border border-black font-bold underline uppercase" rowSpan={3}>SOSPESI</td>
-              <td className="p-1.5 border border-black font-bold text-right uppercase">C/430000 ACQUISTI MERCI</td>
-              <td className="p-1.5 border border-black text-right font-mono">{formatAccountingCurrency(0)}</td>
-              <td className="p-1.5 border border-black text-right font-mono font-semibold">{formatAccountingCurrency(totSospesi)}</td>
-              <td className="p-1.5 border border-black text-right font-mono">{formatAccountingCurrency(0)}</td>
-              <td className="p-1.5 border border-black text-right font-mono">{formatAccountingCurrency(0)}</td>
-            </tr>
-            <tr>
-              <td className="p-1.5 border border-black"></td>
-              <td className="p-1.5 border border-black font-bold text-right uppercase">C/441120 LAVORAZIONI DI TERZI</td>
-              <td className="p-1.5 border border-black text-right font-mono">{formatAccountingCurrency(0)}</td>
-              <td className="p-1.5 border border-black text-right font-mono font-semibold">{formatAccountingCurrency(0)}</td>
-              <td className="p-1.5 border border-black text-right font-mono">{formatAccountingCurrency(0)}</td>
-              <td className="p-1.5 border border-black text-right font-mono">{formatAccountingCurrency(0)}</td>
-            </tr>
-            <tr>
-              <td className="p-1.5 border border-black"></td>
-              <td className="p-1.5 border border-black font-bold text-right uppercase">C/450200 LOCAZIONI PASSIVE ALTRI BENI</td>
-              <td className="p-1.5 border border-black text-right font-mono">{formatAccountingCurrency(0)}</td>
-              <td className="p-1.5 border border-black text-right font-mono font-semibold">{formatAccountingCurrency(0)}</td>
-              <td className="p-1.5 border border-black text-right font-mono">{formatAccountingCurrency(0)}</td>
-              <td className="p-1.5 border border-black text-right font-mono">{formatAccountingCurrency(0)}</td>
-            </tr>
-
-            {/* Row TOTALI */}
-            <tr className="border-t-2 border-black font-black text-xs">
-              <td className="p-2 border border-black"></td>
-              <td className="p-2 border border-black"></td>
-              <td className="p-2 border border-black text-right uppercase tracking-wider">TOTALI</td>
-              <td className="p-2 border border-black text-right font-mono">{formatAccountingCurrency(finalRI)}</td>
-              <td className="p-2 border border-black text-right font-mono">{formatAccountingCurrency(finalAcq)}</td>
-              <td className="p-2 border border-black text-right font-mono">{formatAccountingCurrency(finalEme)}</td>
-              <td className="p-2 border border-black text-right font-mono">{formatAccountingCurrency(finalRF)}</td>
+            {/* RIGA TOTALI CANTIERI: Riga in grassetto con bordo marcato riportante TOTALI */}
+            <tr className="border-t-2 border-b-2 border-slate-900 bg-slate-100 font-black text-xs text-slate-950">
+              <td className="p-2 border border-slate-400 text-right uppercase tracking-wider" colSpan={3}>
+                TOTALI
+              </td>
+              <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumRI)}</td>
+              <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumAcquisti)}</td>
+              <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumEmesse)}</td>
+              <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumRF)}</td>
             </tr>
           </tbody>
         </table>
 
-        {/* Section QUADRATURA */}
+        {/* SEZIONE SOSPESI / QUADRATURA */}
         <div className="pt-2">
-          <div className="flex justify-between items-start gap-6">
-            <div className="w-[50%] space-y-3">
-              <div className="font-black text-sm uppercase">QUADRATURA</div>
+          <div className="bg-slate-100 border border-slate-400 px-3 py-1.5 font-black text-xs uppercase text-slate-900 mb-3 tracking-wide">
+            SEZIONE QUADRATURA / SOSPESI
+          </div>
 
-              {/* Acquisti */}
-              <div className="border border-black">
+          <div className="flex flex-col md:flex-row justify-between items-start gap-6">
+            <div className="w-full md:w-[55%] space-y-4">
+              {/* Acquisti Mastri */}
+              <div className="border border-slate-400">
+                <div className="bg-slate-50 px-2.5 py-1 font-bold text-[11px] uppercase border-b border-slate-400 text-slate-800">
+                  Suddivisione Acquisti per Mastro / Categoria
+                </div>
                 <table className="w-full border-collapse text-xs">
                   <tbody>
                     {mastriAcq.map((m) => (
-                      <tr key={m.code} className="border-b border-black">
-                        <td className="p-1.5 font-bold uppercase">{m.code} {m.description}</td>
-                        <td className="p-1.5 text-right font-mono">{formatAccountingCurrency(m.amount)}</td>
+                      <tr key={m.code} className="border-b border-slate-300">
+                        <td className="p-1.5 font-medium text-slate-800 uppercase">{m.code} {m.description}</td>
+                        <td className="p-1.5 text-right font-mono text-slate-900">{formatAccountingCurrency(m.amount)}</td>
                       </tr>
                     ))}
-                    <tr className="font-black border-t border-black bg-slate-50">
+                    <tr className="font-black border-t border-slate-400 bg-slate-100 text-slate-950">
                       <td className="p-1.5 text-right uppercase">TOTALE ACQUISTI</td>
                       <td className="p-1.5 text-right font-mono">{formatAccountingCurrency(totMastriAcq)}</td>
                     </tr>
@@ -218,17 +197,20 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
                 </table>
               </div>
 
-              {/* Vendite */}
-              <div className="border border-black">
+              {/* Vendite Mastri */}
+              <div className="border border-slate-400">
+                <div className="bg-slate-50 px-2.5 py-1 font-bold text-[11px] uppercase border-b border-slate-400 text-slate-800">
+                  Suddivisione Ricavi / Vendite
+                </div>
                 <table className="w-full border-collapse text-xs">
                   <tbody>
                     {mastriVen.map((m) => (
-                      <tr key={m.code} className="border-b border-black">
-                        <td className="p-1.5 font-bold uppercase">{m.code} {m.description}</td>
-                        <td className="p-1.5 text-right font-mono">{formatAccountingCurrency(m.amount)}</td>
+                      <tr key={m.code} className="border-b border-slate-300">
+                        <td className="p-1.5 font-medium text-slate-800 uppercase">{m.code} {m.description}</td>
+                        <td className="p-1.5 text-right font-mono text-slate-900">{formatAccountingCurrency(m.amount)}</td>
                       </tr>
                     ))}
-                    <tr className="font-black border-t border-black bg-slate-50">
+                    <tr className="font-black border-t border-slate-400 bg-slate-100 text-slate-950">
                       <td className="p-1.5 text-right uppercase">TOTALE VENDITE</td>
                       <td className="p-1.5 text-right font-mono">{formatAccountingCurrency(totMastriVen)}</td>
                     </tr>
@@ -237,16 +219,24 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
               </div>
             </div>
 
-            {/* Sbilancio Box in Bottom Right */}
-            <div className="w-[45%] flex flex-col justify-end items-end pt-8">
-              <div className="border-2 border-black w-80">
-                <div className="grid grid-cols-2 border-b-2 border-black text-center font-black text-xs uppercase py-1.5">
-                  <div className="border-r border-black px-2">SBILANCIO ACQUISTI</div>
+            {/* Sbilancio Box */}
+            <div className="w-full md:w-[42%] flex flex-col justify-start items-end pt-1">
+              <div className="border-2 border-slate-900 w-full bg-slate-50">
+                <div className="grid grid-cols-2 border-b-2 border-slate-900 text-center font-black text-xs uppercase py-2 bg-slate-200 text-slate-900">
+                  <div className="border-r border-slate-900 px-2">SBILANCIO ACQUISTI</div>
                   <div className="px-2">SBILANCIO RICAVI</div>
                 </div>
-                <div className="grid grid-cols-2 font-mono font-bold text-center py-2 text-sm">
-                  <div className="border-r border-black px-2">{formatAccountingCurrency(sbilancioAcq)}</div>
-                  <div className="px-2">{formatAccountingCurrency(sbilancioVen)}</div>
+                <div className="grid grid-cols-2 font-mono font-black text-center py-3 text-sm">
+                  <div className={`border-r border-slate-900 px-2 ${sbilancioAcq !== 0 ? 'text-amber-800' : 'text-emerald-700'}`}>
+                    {formatAccountingCurrency(sbilancioAcq)}
+                  </div>
+                  <div className={`px-2 ${sbilancioVen !== 0 ? 'text-amber-800' : 'text-emerald-700'}`}>
+                    {formatAccountingCurrency(sbilancioVen)}
+                  </div>
+                </div>
+                <div className="border-t border-slate-300 p-2 text-[10px] text-slate-600 bg-white leading-tight">
+                  <div>• Sbilancio Acquisti: Tot. Acquisti Mastri - (Acquisti Cantieri + Sospesi)</div>
+                  <div>• Sbilancio Ricavi: Tot. Vendite Mastri - (Emesse + RF - RI)</div>
                 </div>
               </div>
             </div>
@@ -254,14 +244,14 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
         </div>
 
         {/* Signatures */}
-        <div className="pt-8 mt-6 border-t border-black flex justify-between items-end text-xs text-slate-700">
+        <div className="pt-8 mt-6 border-t border-slate-400 flex justify-between items-end text-xs text-slate-700">
           <div>
-            <span>Firma Studio Contabile:</span>
-            <div className="mt-6 border-b border-black w-48" />
+            <span className="font-medium">Firma Studio Contabile:</span>
+            <div className="mt-6 border-b border-slate-900 w-48" />
           </div>
           <div>
-            <span>Firma Cliente / Impresa:</span>
-            <div className="mt-6 border-b border-black w-48" />
+            <span className="font-medium">Firma Cliente / Impresa:</span>
+            <div className="mt-6 border-b border-slate-900 w-48" />
           </div>
         </div>
       </div>

@@ -43,6 +43,7 @@ import {
   buildFormattedTypeAndSubject,
 } from '../utils/invoiceDuplicateHelper';
 import { CantiereSearchSelect } from './CantiereSearchSelect';
+import { CantiereModal } from './CantiereModal';
 
 interface XmlImportModalProps {
   cantieri: Cantiere[];
@@ -96,6 +97,17 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
   const [xmlContent, setXmlContent] = useState<string>('');
   const [parsedInvoice, setParsedInvoice] = useState<ParsedInvoiceXML | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Additional cantieri created on-the-fly during this import session
+  const [localExtraCantieri, setLocalExtraCantieri] = useState<Cantiere[]>([]);
+
+  // Merged cantieri list including any newly created cantieri during this modal session
+  const allCantieri: Cantiere[] = React.useMemo(() => {
+    const map = new Map<string, Cantiere>();
+    cantieri.forEach((c) => map.set(c.id, c));
+    localExtraCantieri.forEach((c) => map.set(c.id, c));
+    return Array.from(map.values());
+  }, [cantieri, localExtraCantieri]);
 
   // Duplicate invoice prompt state
   const [duplicatePromptLocations, setDuplicatePromptLocations] = useState<InvoiceLocation[] | null>(null);
@@ -165,11 +177,11 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
     return findExistingPurchaseInvoiceLocations(
       invNum,
       parsedInvoice.cedentePrestatore.denominazione,
-      cantieri,
+      allCantieri,
       sospesi,
       parsedInvoice.fileName
     );
-  }, [parsedInvoice, customInvoiceNumber, cantieri, sospesi]);
+  }, [parsedInvoice, customInvoiceNumber, allCantieri, sospesi]);
 
   // Total Imponibile (considera solo l'imponibile e se ci sono più aliquote IVA somma tutti gli imponibili)
   const invoiceImponibile = React.useMemo(() => {
@@ -207,82 +219,65 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
     return `${c.name} (${clientName})`;
   };
 
-  // State for Quick Cantiere Creation directly from any dropdown
-  interface QuickCreateTargetContext {
+  // Context to know which allocation triggered the "Nuovo Cantiere" modal
+  interface CreateCantiereTargetContext {
     mode: 'whole' | 'ddt' | 'line' | 'line_split';
     key?: string | number;
     splitIndex?: number;
   }
-  const [quickCreateContext, setQuickCreateContext] = useState<QuickCreateTargetContext | null>(null);
-  const [quickCity, setQuickCity] = useState('');
-  const [quickAddress, setQuickAddress] = useState('');
-  const [quickClient, setQuickClient] = useState('');
-  const [quickName, setQuickName] = useState('');
-  const [quickError, setQuickError] = useState<string | null>(null);
+  const [createCantiereContext, setCreateCantiereContext] = useState<CreateCantiereTargetContext | null>(null);
 
-  const openQuickCreate = (context: QuickCreateTargetContext) => {
-    setQuickCreateContext(context);
-    setQuickCity(cantieri[0]?.city || '');
-    setQuickAddress('');
-    setQuickClient('');
-    setQuickName('');
-    setQuickError(null);
+  const openCreateCantiereModal = (context: CreateCantiereTargetContext) => {
+    setCreateCantiereContext(context);
   };
 
-  const handleExecuteQuickCreateCantiere = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!quickCity.trim() || !quickClient.trim()) {
-      setQuickError('Inserisci obbligatoriamente Città e Nome del Cliente.');
-      return;
-    }
-    setQuickError(null);
-
-    const generatedName = quickName.trim()
-      ? quickName.trim().toUpperCase()
-      : `${quickCity.trim().toUpperCase()} - ${(quickAddress.trim() || quickClient.trim()).toUpperCase()}`;
-
+  const handleSaveNewCantiereFromModal = (cantiereData: Partial<Cantiere>) => {
     let newCantiere: Cantiere;
     if (onCreateNewCantiereDirectly) {
-      newCantiere = onCreateNewCantiereDirectly({
-        city: quickCity.trim().toUpperCase(),
-        address: quickAddress.trim().toUpperCase(),
-        client: quickClient.trim().toUpperCase(),
-        name: generatedName,
-      });
+      newCantiere = onCreateNewCantiereDirectly(cantiereData);
     } else {
+      const upperName = (cantiereData.name || 'NUOVO CANTIERE').trim().toUpperCase();
+      const upperCity = (cantiereData.city || cantieri[0]?.city || 'MILANO').trim().toUpperCase();
+      const upperAddress = cantiereData.address?.trim() ? cantiereData.address.trim().toUpperCase() : '';
+
       newCantiere = {
         id: `cantiere-${Date.now()}`,
-        name: generatedName,
-        city: quickCity.trim().toUpperCase(),
-        address: quickAddress.trim().toUpperCase(),
-        client: quickClient.trim().toUpperCase(),
-        date: new Date().toISOString().slice(0, 10),
-        year: 2026,
-        initialInventory: 0,
-        finalInventory: 0,
-        category: 'elettrico',
-        status: 'attivo',
-        notes: '',
+        name: upperName,
+        city: upperCity,
+        address: upperAddress || '',
+        date: cantiereData.date || new Date().toISOString().slice(0, 10),
+        year: cantiereData.year || 2026,
+        client: upperName,
+        initialInventory: cantiereData.initialInventory || 0,
+        finalInventory: cantiereData.finalInventory || 0,
+        category: cantiereData.category || 'idraulico',
+        status: cantiereData.status || 'attivo',
+        notes: cantiereData.notes || '',
         movements: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
     }
 
+    // Immediately register in local cantieri list so it shows up in combobox and select lists
+    setLocalExtraCantieri((prev) => [...prev, newCantiere]);
+
     // Automatically select the newly created cantiere in the active allocation field
-    if (quickCreateContext) {
-      if (quickCreateContext.mode === 'whole') {
+    if (createCantiereContext) {
+      if (createCantiereContext.mode === 'whole') {
         setWholeInvoiceCantiereId(newCantiere.id);
-      } else if (quickCreateContext.mode === 'ddt' && quickCreateContext.key) {
+        setErrorMessage(null);
+      } else if (createCantiereContext.mode === 'ddt' && createCantiereContext.key) {
         setDdtAllocations((prev) => ({
           ...prev,
-          [String(quickCreateContext.key)]: {
-            ...prev[String(quickCreateContext.key)],
+          [String(createCantiereContext.key)]: {
+            ...prev[String(createCantiereContext.key)],
             targetCantiereId: newCantiere.id,
           },
         }));
-      } else if (quickCreateContext.mode === 'line' && quickCreateContext.key !== undefined) {
-        const lineNum = Number(quickCreateContext.key);
+        setErrorMessage(null);
+      } else if (createCantiereContext.mode === 'line' && createCantiereContext.key !== undefined) {
+        const lineNum = Number(createCantiereContext.key);
         setLineAllocations((prev) => ({
           ...prev,
           [lineNum]: {
@@ -290,13 +285,14 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             targetCantiereId: newCantiere.id,
           },
         }));
+        setErrorMessage(null);
       } else if (
-        quickCreateContext.mode === 'line_split' &&
-        quickCreateContext.key !== undefined &&
-        quickCreateContext.splitIndex !== undefined
+        createCantiereContext.mode === 'line_split' &&
+        createCantiereContext.key !== undefined &&
+        createCantiereContext.splitIndex !== undefined
       ) {
-        const lineNum = Number(quickCreateContext.key);
-        const sIdx = quickCreateContext.splitIndex;
+        const lineNum = Number(createCantiereContext.key);
+        const sIdx = createCantiereContext.splitIndex;
         const currentLine = lineAllocations[lineNum];
         if (currentLine && currentLine.splits[sIdx]) {
           handleUpdateLineSplit(
@@ -307,14 +303,11 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             parsedInvoice?.righe.find((r) => r.numeroLinea === lineNum)?.prezzoTotale || 0
           );
         }
+        setErrorMessage(null);
       }
     }
 
-    setQuickCreateContext(null);
-    setQuickCity('');
-    setQuickAddress('');
-    setQuickClient('');
-    setQuickName('');
+    setCreateCantiereContext(null);
   };
 
   // Handle file select or drop (supports XML and PDF)
@@ -447,7 +440,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
   // Trigger Gemini AI suggestion
   const handleAskGeminiAi = async () => {
     if (!parsedInvoice) return;
-    if (cantieri.length === 0) {
+    if (allCantieri.length === 0) {
       setErrorMessage('Non ci sono cantieri registrati. Crea prima un cantiere.');
       return;
     }
@@ -482,7 +475,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
               ddtDate: r.ddtData,
             }));
 
-      const cantieriPayload = cantieri.map((c) => ({
+      const cantieriPayload = allCantieri.map((c: Cantiere) => ({
         id: c.id,
         name: c.name,
         client: c.client,
@@ -1904,14 +1897,14 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                         hasError={showValidationErrors && !wholeInvoiceCantiereId}
                         onChange={(val) => {
                           if (val === '__create_new__') {
-                            openQuickCreate({ mode: 'whole' });
+                            openCreateCantiereModal({ mode: 'whole' });
                             return;
                           }
                           setWholeInvoiceCantiereId(val);
                           if (val) setErrorMessage(null);
                         }}
-                        cantieri={cantieri}
-                        onCreateNew={() => openQuickCreate({ mode: 'whole' })}
+                        cantieri={allCantieri}
+                        onCreateNew={() => openCreateCantiereModal({ mode: 'whole' })}
                         showSospesiOption={true}
                         showIgnoreOption={true}
                         sospesiLabel="⚠️ Invia a SCHEDA SOSPESI (Da chiarire con il cliente)"
@@ -1923,9 +1916,9 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => openQuickCreate({ mode: 'whole' })}
+                      onClick={() => openCreateCantiereModal({ mode: 'whole' })}
                       className="px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
-                      title="Crea direttamente un nuovo cantiere da questo elenco"
+                      title="Crea direttamente un nuovo cantiere con la schermata standard"
                     >
                       <Plus className="h-4 w-4" />
                       <span>Nuovo Cantiere</span>
@@ -2280,7 +2273,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                   hasError={showValidationErrors && !alloc.targetCantiereId}
                                   onChange={(val) => {
                                     if (val === '__create_new__') {
-                                      openQuickCreate({ mode: 'ddt', key: ddt.numeroDDT });
+                                      openCreateCantiereModal({ mode: 'ddt', key: ddt.numeroDDT });
                                       return;
                                     }
                                     setDdtAllocations((prev) => ({
@@ -2292,8 +2285,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                     }));
                                     if (val) setErrorMessage(null);
                                   }}
-                                  cantieri={cantieri}
-                                  onCreateNew={() => openQuickCreate({ mode: 'ddt', key: ddt.numeroDDT })}
+                                  cantieri={allCantieri}
+                                  onCreateNew={() => openCreateCantiereModal({ mode: 'ddt', key: ddt.numeroDDT })}
                                   showSospesiOption={true}
                                   showIgnoreOption={true}
                                   sospesiLabel="⚠️ Invia a SCHEDA SOSPESI (DDT da chiarire col cliente)"
@@ -2305,9 +2298,9 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
                               <button
                                 type="button"
-                                onClick={() => openQuickCreate({ mode: 'ddt', key: ddt.numeroDDT })}
+                                onClick={() => openCreateCantiereModal({ mode: 'ddt', key: ddt.numeroDDT })}
                                 className="px-2 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-bold flex items-center gap-1 transition-all cursor-pointer shrink-0"
-                                title="Crea direttamente un nuovo cantiere"
+                                title="Crea direttamente un nuovo cantiere con la schermata standard"
                               >
                                 <Plus className="h-3.5 w-3.5" />
                                 <span>Nuovo</span>
@@ -2359,7 +2352,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                     parsedInvoice.ddtList.forEach((ddt) => {
                       const alloc = ddtAllocations[ddt.numeroDDT];
                       if (!alloc || alloc.targetCantiereId === '__ignore__' || alloc.targetCantiereId === '__sospeso__') return;
-                      const cantiereObj = cantieri.find((c) => c.id === alloc.targetCantiereId);
+                      const cantiereObj = allCantieri.find((c: Cantiere) => c.id === alloc.targetCantiereId);
                       if (!cantiereObj) return;
 
                       const connected = parsedInvoice.righe.filter((r) => ddt.riferimentoLinee.includes(r.numeroLinea));
@@ -2545,7 +2538,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                   hasError={showValidationErrors && !alloc.targetCantiereId}
                                   onChange={(val) => {
                                     if (val === '__create_new__') {
-                                      openQuickCreate({ mode: 'line', key: riga.numeroLinea });
+                                      openCreateCantiereModal({ mode: 'line', key: riga.numeroLinea });
                                       return;
                                     }
                                     setLineAllocations((prev) => ({
@@ -2557,8 +2550,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                     }));
                                     if (val) setErrorMessage(null);
                                   }}
-                                  cantieri={cantieri}
-                                  onCreateNew={() => openQuickCreate({ mode: 'line', key: riga.numeroLinea })}
+                                  cantieri={allCantieri}
+                                  onCreateNew={() => openCreateCantiereModal({ mode: 'line', key: riga.numeroLinea })}
                                   showSospesiOption={true}
                                   showIgnoreOption={true}
                                   sospesiLabel="⚠️ Invia a SCHEDA SOSPESI (Da attribuire)"
@@ -2570,9 +2563,9 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
                                 <button
                                   type="button"
-                                  onClick={() => openQuickCreate({ mode: 'line', key: riga.numeroLinea })}
+                                  onClick={() => openCreateCantiereModal({ mode: 'line', key: riga.numeroLinea })}
                                   className="px-2 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shrink-0"
-                                  title="Crea direttamente un nuovo cantiere"
+                                  title="Crea direttamente un nuovo cantiere con la schermata standard"
                                 >
                                   <Plus className="h-3 w-3" />
                                   <span>Nuovo</span>
@@ -2639,13 +2632,13 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
                               {alloc.splits.map((sp, sIdx) => (
                                 <div key={sIdx} className="flex items-center gap-2 text-xs">
-                                  <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
                                     <CantiereSearchSelect
                                       value={sp.cantiereId}
                                       hasError={showValidationErrors && !sp.cantiereId}
                                       onChange={(val) => {
                                         if (val === '__create_new__') {
-                                          openQuickCreate({ mode: 'line_split', key: riga.numeroLinea, splitIndex: sIdx });
+                                          openCreateCantiereModal({ mode: 'line_split', key: riga.numeroLinea, splitIndex: sIdx });
                                           return;
                                         }
                                         handleUpdateLineSplit(
@@ -2657,8 +2650,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                         );
                                         if (val) setErrorMessage(null);
                                       }}
-                                      cantieri={cantieri}
-                                      onCreateNew={() => openQuickCreate({ mode: 'line_split', key: riga.numeroLinea, splitIndex: sIdx })}
+                                      cantieri={allCantieri}
+                                      onCreateNew={() => openCreateCantiereModal({ mode: 'line_split', key: riga.numeroLinea, splitIndex: sIdx })}
                                       showSospesiOption={true}
                                       showIgnoreOption={true}
                                       sospesiLabel="⚠️ Scheda Sospesi"
@@ -2667,6 +2660,16 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                       size="sm"
                                       className="flex-1 min-w-0"
                                     />
+
+                                    <button
+                                      type="button"
+                                      onClick={() => openCreateCantiereModal({ mode: 'line_split', key: riga.numeroLinea, splitIndex: sIdx })}
+                                      className="px-2 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shrink-0"
+                                      title="Crea direttamente un nuovo cantiere con la schermata standard"
+                                    >
+                                      <Plus className="h-3 w-3" />
+                                      <span>Nuovo</span>
+                                    </button>
                                   </div>
 
                                   <div className="flex items-center gap-1 w-24">
@@ -2928,113 +2931,18 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         </div>
       </div>
 
-      {/* Quick Create Cantiere Modal directly from dropdown */}
-      {quickCreateContext && (
-        <div className="fixed inset-0 z-[70] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-emerald-500/50 rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4 animate-scaleIn text-left">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2 text-emerald-400">
-                <Building className="h-5 w-5" />
-                <h3 className="text-base font-bold text-white">Crea Nuovo Cantiere Rapido</h3>
-              </div>
-              <button
-                onClick={() => setQuickCreateContext(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Inserisci i dati del cantiere. Verrà creato istantaneamente e subito selezionato per questa assegnazione.
-            </p>
-
-            {quickError && (
-              <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs rounded-lg flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 shrink-0" />
-                <span>{quickError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleExecuteQuickCreateCantiere} className="space-y-3 text-xs">
-              <div>
-                <label className="block font-bold text-slate-300 mb-1">
-                  Città Cantiere <span className="text-rose-400">*</span>:
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={quickCity}
-                  onChange={(e) => setQuickCity(e.target.value)}
-                  placeholder="es. MILANO, MONZA, ROMA..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white uppercase focus:outline-none focus:border-emerald-400 font-semibold"
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1">
-                  Via / Indirizzo e N° Civico:
-                </label>
-                <input
-                  type="text"
-                  value={quickAddress}
-                  onChange={(e) => setQuickAddress(e.target.value)}
-                  placeholder="es. VIA ROMA 10, CORSO ITALIA 45..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white uppercase focus:outline-none focus:border-emerald-400"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-300 mb-1">
-                  Nome Cliente / Committente <span className="text-rose-400">*</span>:
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={quickClient}
-                  onChange={(e) => setQuickClient(e.target.value)}
-                  placeholder="es. ROSSI MARIO, CONDOMINIO VERDI, SRL AZIENDA..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white uppercase focus:outline-none focus:border-emerald-400 font-semibold"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-400 mb-1">
-                  Denominazione Cantiere (opzionale):
-                </label>
-                <input
-                  type="text"
-                  value={quickName}
-                  onChange={(e) => setQuickName(e.target.value)}
-                  placeholder={
-                    quickCity.trim()
-                      ? `${quickCity.toUpperCase()} - ${(quickAddress.trim() || quickClient.trim()).toUpperCase()}`
-                      : 'Auto-generato da Città e Indirizzo'
-                  }
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-slate-300 uppercase focus:outline-none focus:border-emerald-400 text-xs"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setQuickCreateContext(null)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-lg cursor-pointer"
-                >
-                  Annulla
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg cursor-pointer shadow-md flex items-center gap-1.5"
-                >
-                  <Check className="h-4 w-4" />
-                  <span>Crea Cantiere e Assegna</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* Modal Nuovo Cantiere identica alla schermata standard del tasto "Nuovo Cantiere" */}
+      {createCantiereContext && (
+        <CantiereModal
+          zIndex="z-[80]"
+          initialData={{
+            city: allCantieri[0]?.city || '',
+            year: 2026,
+            status: 'attivo',
+          }}
+          onClose={() => setCreateCantiereContext(null)}
+          onSave={handleSaveNewCantiereFromModal}
+        />
       )}
 
       {/* Duplicate invoice confirmation modal */}
