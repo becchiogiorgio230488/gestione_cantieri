@@ -20,6 +20,7 @@ import {
   QuadraturaContabile,
   NavigationLevel,
   MagazzinoData,
+  AttachmentPdf,
 } from './types';
 import {
   loadArtigiani,
@@ -437,6 +438,185 @@ export default function App() {
     );
   };
 
+  // Add, modify, or remove PDF from a DDT/movement, automatically synchronizing across ALL cantieri and sospesi sharing the same invoice
+  const handleUpdateMovementPdf = (
+    cantiereId: string,
+    movement: Movement,
+    newAttachmentPdf: AttachmentPdf | null
+  ) => {
+    if (!currentArtigiano) return;
+
+    const invNum = extractInvoiceNumberFromMovement(movement);
+    const supp = extractSupplierFromMovement(movement);
+    const isIssued =
+      movement.issued !== 0 ||
+      movement.source === 'fattura_emessa' ||
+      movement.typeAndSubject.includes('EMESS');
+
+    let updatedMovementsCount = 0;
+    const involvedCantieriNames = new Set<string>();
+
+    updateCurrentArtigiano((art) => {
+      const nextCantieri = art.cantieri.map((c) => {
+        let cantiereHasChanges = false;
+        const nextMovs = c.movements.map((m) => {
+          const isTarget = m.id === movement.id;
+          let isSameInvoice = false;
+
+          if (invNum) {
+            if (isIssued) {
+              isSameInvoice = cleanInvoiceNum(m.docNumber) === invNum;
+            } else {
+              const mInv = extractInvoiceNumberFromMovement(m);
+              const mSupp = extractSupplierFromMovement(m);
+              isSameInvoice = mInv === invNum && isSameSupplier(supp, mSupp);
+            }
+          }
+
+          if (isTarget || isSameInvoice) {
+            cantiereHasChanges = true;
+            updatedMovementsCount++;
+            involvedCantieriNames.add(c.name);
+            return {
+              ...m,
+              attachmentPdf: newAttachmentPdf || undefined,
+            };
+          }
+          return m;
+        });
+
+        if (cantiereHasChanges) {
+          return {
+            ...c,
+            movements: nextMovs,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return c;
+      });
+
+      // Also update any matching Sospesi items if it's a purchase invoice
+      let nextSospesi = art.sospesi;
+      if (!isIssued && invNum && art.sospesi && art.sospesi.length > 0) {
+        nextSospesi = art.sospesi.map((s) => {
+          const sInv = cleanInvoiceNum(s.docNumber);
+          if (sInv === invNum && isSameSupplier(supp, s.supplier)) {
+            return {
+              ...s,
+              attachmentPdf: newAttachmentPdf || undefined,
+            };
+          }
+          return s;
+        });
+      }
+
+      return {
+        ...art,
+        cantieri: nextCantieri,
+        sospesi: nextSospesi,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    const cantieriCount = involvedCantieriNames.size;
+    if (newAttachmentPdf) {
+      if (cantieriCount > 1) {
+        showNotification(
+          `PDF "${newAttachmentPdf.fileName}" allegato automaticamente a tutti i ${updatedMovementsCount} DDT della fattura "${movement.docNumber}" presenti in ${cantieriCount} cantieri diversi!`
+        );
+      } else {
+        showNotification(
+          `PDF "${newAttachmentPdf.fileName}" allegato con successo al DDT "${movement.docNumber}".`
+        );
+      }
+    } else {
+      if (cantieriCount > 1) {
+        showNotification(
+          `Allegato PDF rimosso da tutti i ${updatedMovementsCount} DDT della fattura "${movement.docNumber}" (${cantieriCount} cantieri).`
+        );
+      } else {
+        showNotification(`Allegato PDF rimosso dal DDT "${movement.docNumber}".`);
+      }
+    }
+  };
+
+  const handleUpdateSospesoPdf = (
+    sospeso: SospesoItem,
+    newAttachmentPdf: AttachmentPdf | null
+  ) => {
+    if (!currentArtigiano) return;
+
+    const invNum = cleanInvoiceNum(sospeso.docNumber);
+    const supp = (sospeso.supplier || '').toUpperCase().trim();
+    let updatedMovementsCount = 0;
+    const involvedCantieriNames = new Set<string>();
+
+    updateCurrentArtigiano((art) => {
+      // Update matching items in cantieri
+      const nextCantieri = art.cantieri.map((c) => {
+        let cantiereHasChanges = false;
+        const nextMovs = c.movements.map((m) => {
+          if (invNum) {
+            const mInv = extractInvoiceNumberFromMovement(m);
+            const mSupp = extractSupplierFromMovement(m);
+            if (mInv === invNum && isSameSupplier(supp, mSupp)) {
+              cantiereHasChanges = true;
+              updatedMovementsCount++;
+              involvedCantieriNames.add(c.name);
+              return {
+                ...m,
+                attachmentPdf: newAttachmentPdf || undefined,
+              };
+            }
+          }
+          return m;
+        });
+
+        if (cantiereHasChanges) {
+          return {
+            ...c,
+            movements: nextMovs,
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return c;
+      });
+
+      // Update matching items in sospesi
+      const nextSospesi = (art.sospesi || []).map((s) => {
+        if (s.id === sospeso.id || (invNum && cleanInvoiceNum(s.docNumber) === invNum && isSameSupplier(supp, s.supplier))) {
+          return {
+            ...s,
+            attachmentPdf: newAttachmentPdf || undefined,
+          };
+        }
+        return s;
+      });
+
+      return {
+        ...art,
+        cantieri: nextCantieri,
+        sospesi: nextSospesi,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+
+    const cantieriCount = involvedCantieriNames.size;
+    if (newAttachmentPdf) {
+      if (cantieriCount > 0) {
+        showNotification(
+          `PDF "${newAttachmentPdf.fileName}" allegato alla voce sospesa e sincronizzato su ${updatedMovementsCount} DDT della fattura in ${cantieriCount} cantieri!`
+        );
+      } else {
+        showNotification(
+          `PDF "${newAttachmentPdf.fileName}" allegato con successo alla voce dei Sospesi.`
+        );
+      }
+    } else {
+      showNotification(`Allegato PDF rimosso dalla voce dei Sospesi e dai DDT collegati.`);
+    }
+  };
+
   const handleSaveCantiereModal = (cantiereData: Partial<Cantiere>) => {
     if (!currentArtigiano) return;
 
@@ -832,6 +1012,7 @@ export default function App() {
           typeAndSubject: updatedTypeAndSubject,
           notes: updatedNotes,
           protocol: existing.protocol || sosp.protocol || '',
+          attachmentPdf: existing.attachmentPdf || sosp.attachmentPdf,
         };
 
         nextMovements = targetC.movements.map((m, idx) =>
@@ -855,6 +1036,7 @@ export default function App() {
           purchases: addAmount,
           issued: 0,
           source: 'xml',
+          attachmentPdf: sosp.attachmentPdf,
           notes: sosp.customerNote ? `Nota: ${sosp.customerNote}` : 'Spostato da Scheda Sospesi',
           xmlRef: {
             supplier: supplier,
@@ -961,6 +1143,7 @@ export default function App() {
             typeAndSubject: updatedTypeAndSubject,
             notes: updatedNotes,
             protocol: existing.protocol || sosp.protocol || '',
+            attachmentPdf: existing.attachmentPdf || sosp.attachmentPdf,
           };
         } else {
           // Strictly format Tipo Doc. / Fornitore as: "FORNITORE (DDT N. ... DEL ...)" and NIENT'ALTRO
@@ -978,6 +1161,7 @@ export default function App() {
             purchases: addAmount,
             issued: 0,
             source: 'xml',
+            attachmentPdf: sosp.attachmentPdf,
             notes: sosp.customerNote ? `Nota: ${sosp.customerNote}` : 'Spostato da Scheda Sospesi',
             xmlRef: {
               supplier: supplier,
@@ -1315,6 +1499,7 @@ export default function App() {
             onBack={() => setNavLevel('prospetto_cantieri')}
             onSelectCantiere={(id) => setSelectedCantiereId(id)}
             onUpdateCantiere={handleUpdateCantiere}
+            onUpdateMovementPdf={handleUpdateMovementPdf}
             onDeleteMovement={handleDeleteMovement}
             onDeleteMovementFromAllCantieri={handleDeleteMovementFromAllCantieri}
             onMoveToSospesi={(mov) => handleMoveMovementToSospesi(currentCantiere.id, mov)}
@@ -1336,6 +1521,7 @@ export default function App() {
             onAssignToCantiere={handleAssignSospesoToCantiere}
             onAssignMultipleToCantiere={handleAssignMultipleSospesiToCantiere}
             onUpdateSospeso={handleUpdateSospeso}
+            onUpdateSospesoPdf={handleUpdateSospesoPdf}
             onDeleteSospeso={handleDeleteSospeso}
             onDeleteMultipleSospesi={handleDeleteMultipleSospesi}
             onClearAllSospesi={handleClearAllSospesi}

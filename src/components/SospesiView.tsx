@@ -21,12 +21,15 @@ import {
   Square,
   Lock,
   EyeOff,
+  Paperclip,
 } from 'lucide-react';
-import { Cantiere, SospesoItem, Movement } from '../types';
+import { Cantiere, SospesoItem, Movement, AttachmentPdf } from '../types';
 import { formatCurrency, formatDateItalian, getTodayISODate } from '../utils/calculations';
 import { exportSospesiExcel } from '../utils/excelExport';
 import { ConfirmModal } from './ConfirmModal';
 import { CantiereSearchSelect, formatCantiereLabel } from './CantiereSearchSelect';
+import { openOrDownloadPdf } from '../utils/pdfStorage';
+import { PdfAttachmentModal } from './PdfAttachmentModal';
 
 interface SospesiViewProps {
   sospesi: SospesoItem[];
@@ -36,6 +39,7 @@ interface SospesiViewProps {
   onAssignToCantiere: (sospesoId: string, targetCantiereId: string) => void;
   onAssignMultipleToCantiere?: (sospesiIds: string[], targetCantiereId: string) => void;
   onUpdateSospeso: (updated: SospesoItem) => void;
+  onUpdateSospesoPdf?: (sospeso: SospesoItem, newPdf: AttachmentPdf | null) => void;
   onDeleteSospeso: (id: string) => void;
   onDeleteMultipleSospesi?: (ids: string[]) => void;
   onClearAllSospesi?: () => void;
@@ -51,6 +55,7 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
   onAssignToCantiere,
   onAssignMultipleToCantiere,
   onUpdateSospeso,
+  onUpdateSospesoPdf,
   onDeleteSospeso,
   onDeleteMultipleSospesi,
   onClearAllSospesi,
@@ -58,6 +63,20 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
   onPrintReport,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [managingPdfSospeso, setManagingPdfSospeso] = useState<SospesoItem | null>(null);
+
+  const handleSavePdf = (newPdf: AttachmentPdf | null) => {
+    if (!managingPdfSospeso) return;
+    if (onUpdateSospesoPdf) {
+      onUpdateSospesoPdf(managingPdfSospeso, newPdf);
+    } else {
+      onUpdateSospeso({
+        ...managingPdfSospeso,
+        attachmentPdf: newPdf || undefined,
+      });
+    }
+    setManagingPdfSospeso(null);
+  };
   const [selectedTargetByItem, setSelectedTargetByItem] = useState<Record<string, string>>({});
   const [sospesoToDelete, setSospesoToDelete] = useState<SospesoItem | null>(null);
   const [isConfirmDeleteSelectedOpen, setIsConfirmDeleteSelectedOpen] = useState(false);
@@ -662,7 +681,40 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
 
                       {/* N° DOC. (Numero fattura) */}
                       <td className="py-3 px-2.5 font-mono font-bold text-amber-300 whitespace-nowrap text-xs">
-                        {s.docNumber}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>{s.docNumber}</span>
+                          {s.attachmentPdf ? (
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => openOrDownloadPdf(s.attachmentPdf!)}
+                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30 flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                                title={`Apri copia PDF fattura (${s.attachmentPdf.fileName})`}
+                              >
+                                <FileText className="h-3 w-3 text-red-400" />
+                                <span>PDF</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setManagingPdfSospeso(s)}
+                                className="p-0.5 text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700 rounded transition-colors cursor-pointer"
+                                title="Modifica, sostituisci o rimuovi il PDF allegato"
+                              >
+                                <Paperclip className="h-3 w-3 text-red-400" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setManagingPdfSospeso(s)}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-semibold text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                              title="Allega copia PDF della fattura a questa voce sospesa (si sincronizzerà su tutti i cantieri)"
+                            >
+                              <Paperclip className="h-3 w-3 text-slate-400 hover:text-red-400" />
+                              <span>+ PDF</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
 
                       {/* TIPO DOC. / FORNITORE */}
@@ -977,6 +1029,16 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
         cancelText="Annulla"
         onConfirm={handleConfirmClearAll}
         onCancel={() => setIsConfirmClearAllOpen(false)}
+      />
+
+      {/* Modal for PDF Management on Sospeso Item with multi-cantiere sync */}
+      <PdfAttachmentModal
+        isOpen={!!managingPdfSospeso}
+        onClose={() => setManagingPdfSospeso(null)}
+        sospeso={managingPdfSospeso}
+        allCantieri={cantieri}
+        sospesi={sospesi}
+        onSavePdf={handleSavePdf}
       />
     </div>
   );

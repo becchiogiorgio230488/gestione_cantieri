@@ -251,6 +251,33 @@ export function parseFatturaElettronicaXML(xmlString: string, fileName = 'fattur
     importoTotale = Math.round(calculatedLinesSum * 100) / 100;
   }
 
+  // 6. Allegati (eventuale copia PDF incorporata nell'XML della Fattura Elettronica)
+  let pdfAttachment: import('../types').AttachmentPdf | undefined;
+  const allegatiElements = getElements(xmlDoc, 'Allegati');
+  for (const aEl of allegatiElements) {
+    const nomeAttachment = getTagText(aEl, 'NomeAttachment');
+    const formatoAttachment = getTagText(aEl, 'FormatoAttachment').toUpperCase();
+    const rawAttachment = getTagText(aEl, 'Attachment');
+    if (rawAttachment && rawAttachment.length > 30) {
+      const cleanBase64 = rawAttachment.replace(/[\r\n\s]/g, '');
+      const isPdf =
+        formatoAttachment.includes('PDF') ||
+        nomeAttachment.toLowerCase().endsWith('.pdf') ||
+        !formatoAttachment;
+      if (isPdf) {
+        const estimatedSize = Math.round(cleanBase64.length * 0.75);
+        pdfAttachment = {
+          id: `pdf-xml-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          fileName: nomeAttachment || `Fattura_${numero || 'allegato'}.pdf`,
+          fileSize: estimatedSize,
+          dataUrl: `data:application/pdf;base64,${cleanBase64}`,
+          uploadedAt: new Date().toISOString(),
+        };
+        break;
+      }
+    }
+  }
+
   return {
     fileName,
     cedentePrestatore: {
@@ -274,6 +301,7 @@ export function parseFatturaElettronicaXML(xmlString: string, fileName = 'fattur
     },
     ddtList,
     righe,
+    pdfAttachment,
     rawXml: xmlString,
   };
 }

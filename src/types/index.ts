@@ -1,6 +1,14 @@
 export type CantiereCategory = 'elettrico' | 'idraulico' | 'edile' | 'misto' | 'altro';
 export type CantiereStatus = 'attivo' | 'completato' | 'preventivo' | 'sospeso';
 
+export interface AttachmentPdf {
+  id?: string;
+  fileName: string;
+  fileSize: number;
+  dataUrl?: string; // Data URL Base64 "data:application/pdf;base64,..."
+  uploadedAt: string;
+}
+
 export interface Movement {
   id: string;
   date: string; // DATA DOC. (YYYY-MM-DD or DD/MM/YYYY)
@@ -11,6 +19,7 @@ export interface Movement {
   issued: number; // EMESSE (fatturato / ricavi)
   notes?: string;
   source?: 'manuale' | 'xml' | 'fattura_emessa';
+  attachmentPdf?: AttachmentPdf;
   xmlRef?: {
     supplier?: string;
     invoiceNum?: string;
@@ -53,6 +62,7 @@ export interface SospesoItem {
   internalNote?: string; // NOTA INTERNA (solo a video, NON stampata né esportata in Excel)
   suggestedCantiereId?: string;
   sourceFileName?: string;
+  attachmentPdf?: AttachmentPdf;
   createdAt: string;
 }
 
@@ -200,6 +210,7 @@ export interface ParsedInvoiceXML {
   };
   ddtList: InvoiceDDT[];
   righe: InvoiceLine[];
+  pdfAttachment?: AttachmentPdf;
   rawXml?: string;
 }
 

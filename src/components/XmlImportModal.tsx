@@ -27,11 +27,15 @@ import {
   FileText,
   MinusCircle,
   Undo2,
+  Paperclip,
+  Eye,
+  Download,
 } from 'lucide-react';
-import { Cantiere, ParsedInvoiceXML, Movement, SospesoItem } from '../types';
+import { Cantiere, ParsedInvoiceXML, Movement, SospesoItem, AttachmentPdf } from '../types';
 import { parseFatturaElettronicaXML } from '../utils/xmlParser';
 import { SAMPLE_INVOICES, SampleInvoice } from '../utils/sampleInvoices';
 import { formatCurrency, formatDateItalian } from '../utils/calculations';
+import { fileToAttachmentPdf, openOrDownloadPdf } from '../utils/pdfStorage';
 import {
   findExistingPurchaseInvoiceLocations,
   InvoiceLocation,
@@ -122,6 +126,30 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
   const [customDdtNames, setCustomDdtNames] = useState<Record<string, string>>({});
   // Flag indicating whether this document is a Nota di Credito (Credit Note) with negative amounts
   const [isNotaDiCredito, setIsNotaDiCredito] = useState<boolean>(false);
+
+  // Attached PDF of the purchase invoice
+  const [attachedPdf, setAttachedPdf] = useState<AttachmentPdf | null>(null);
+  const [isUploadingPdf, setIsUploadingPdf] = useState<boolean>(false);
+  const pdfInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handlePdfFileSelect = async (file: File) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+      setErrorMessage('Seleziona un file valido in formato PDF (.pdf).');
+      return;
+    }
+    try {
+      setIsUploadingPdf(true);
+      const pdfData = await fileToAttachmentPdf(file);
+      setAttachedPdf(pdfData);
+      setErrorMessage(null);
+    } catch (err: any) {
+      console.error('Errore caricamento PDF:', err);
+      setErrorMessage('Errore durante il caricamento del PDF: ' + (err.message || 'file non leggibile'));
+    } finally {
+      setIsUploadingPdf(false);
+    }
+  };
 
   // Helper to resolve custom DDT name or nice default
   const getDdtDisplayName = (numeroDDT: string) => {
@@ -289,21 +317,44 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
     setQuickName('');
   };
 
-  // Handle file select or drop
+  // Handle file select or drop (supports XML and PDF)
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+      handlePdfFileSelect(file);
+      return;
+    }
     readFile(file);
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (!file) return;
-    readFile(file);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length === 0) return;
+
+    const xmlFile = files.find(
+      (f) => f.name.toLowerCase().endsWith('.xml') || f.name.toLowerCase().endsWith('.p7m')
+    );
+    const pdfFile = files.find(
+      (f) => f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf'
+    );
+
+    if (pdfFile) {
+      handlePdfFileSelect(pdfFile);
+    }
+    if (xmlFile) {
+      readFile(xmlFile);
+    } else if (!pdfFile && files[0]) {
+      readFile(files[0]);
+    }
   };
 
   const readFile = (file: File) => {
+    if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+      handlePdfFileSelect(file);
+      return;
+    }
     setErrorMessage(null);
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -324,6 +375,12 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
       const parsed = parseFatturaElettronicaXML(xmlStr, fileName);
       setParsedInvoice(parsed);
       setXmlContent(xmlStr);
+
+      // If the electronic invoice XML includes an embedded PDF, use it automatically
+      if (parsed.pdfAttachment && !attachedPdf) {
+        setAttachedPdf(parsed.pdfAttachment);
+      }
+
       // Initialize editable invoice number with what came from XML
       setCustomInvoiceNumber(parsed.datiDocumento.numero);
       setCustomProtocol('');
@@ -847,6 +904,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             ? 'Nota di credito da verificare a quale cantiere imputare.'
             : 'Da verificare a quale cantiere imputare l\'intera fornitura.',
           sourceFileName: parsedInvoice.fileName,
+          attachmentPdf: attachedPdf || undefined,
         });
       } else {
         const wholeDdtTags = parsedInvoice.ddtList.map((d) =>
@@ -867,6 +925,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             purchases: signedInvoiceImponibile,
             issued: 0,
             source: 'xml',
+            attachmentPdf: attachedPdf || undefined,
             notes: `${isNotaDiCredito ? 'NOTA DI CREDITO - ' : ''}Importazione XML: ${parsedInvoice.fileName} - Fattura ${invoiceNum} (Totale Imponibile: € ${signedInvoiceImponibile.toFixed(2)})`,
             xmlRef: {
               supplier: supplierName,
@@ -927,6 +986,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
               ? 'Nota di credito / DDT da stornare in attesa di chiarimento.'
               : 'DDT in attesa di destinazione da parte del committente/capocantiere.',
             sourceFileName: parsedInvoice.fileName,
+            attachmentPdf: attachedPdf || undefined,
           });
         } else if (alloc.isSplit && alloc.splits.length > 0) {
           alloc.splits.forEach((sp) => {
@@ -949,6 +1009,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                   ? `Nota di credito: quota ${sp.percentage}% da stornare.`
                   : `Quota ${sp.percentage}% da definire col cliente.`,
                 sourceFileName: parsedInvoice.fileName,
+                attachmentPdf: attachedPdf || undefined,
               });
             } else {
               if (!cantiereGroups.has(sp.cantiereId)) {
@@ -1020,6 +1081,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             purchases: signedPurchases,
             issued: 0,
             source: 'xml',
+            attachmentPdf: attachedPdf || undefined,
             notes: `${isNotaDiCredito ? 'NOTA DI CREDITO - ' : ''}Fattura ${invoiceNum} - Totale unico di ${group.ddtItems.length} DDT (${ddtNamesOnly})`,
             xmlRef: {
               supplier: supplierName,
@@ -1057,6 +1119,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
               ? 'Nota di credito / storno articolo da chiarire col cliente.'
               : 'Articolo non attribuito da chiarire con il cliente.',
             sourceFileName: parsedInvoice.fileName,
+            attachmentPdf: attachedPdf || undefined,
           });
         } else if (alloc.isSplit && alloc.splits.length > 0) {
           alloc.splits.forEach((sp, spIdx) => {
@@ -1078,6 +1141,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                   ? `Nota di credito: quota riga ${line.numeroLinea} (${sp.percentage}%) da stornare.`
                   : `Quota riga ${line.numeroLinea} (${sp.percentage}%) da attribuire.`,
                 sourceFileName: parsedInvoice.fileName,
+                attachmentPdf: attachedPdf || undefined,
               });
             } else {
               commitList.push({
@@ -1091,6 +1155,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                   purchases: sign * Math.abs(sp.amount),
                   issued: 0,
                   source: 'xml',
+                  attachmentPdf: attachedPdf || undefined,
                   notes: `${isNotaDiCredito ? 'NOTA DI CREDITO - ' : ''}Quota riga ${line.numeroLinea} (${sp.percentage}%)`,
                   xmlRef: {
                     supplier: supplierName,
@@ -1112,6 +1177,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
               purchases: sign * Math.abs(line.prezzoTotale),
               issued: 0,
               source: 'xml',
+              attachmentPdf: attachedPdf || undefined,
               notes: `${isNotaDiCredito ? 'NOTA DI CREDITO' : ''}${line.codiceArticolo ? ` - Cod. Art.: ${line.codiceArticolo}` : ''}`.trim() || undefined,
               xmlRef: {
                 supplier: supplierName,
@@ -1187,6 +1253,68 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                   </span>
                 </label>
               </div>
+
+              {/* Step 1 PDF Attachment Option */}
+              {attachedPdf ? (
+                <div className="p-3 bg-red-950/30 border border-red-500/40 rounded-xl flex items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <FileText className="h-5 w-5 text-red-400 shrink-0" />
+                    <div className="min-w-0">
+                      <span className="text-[10px] uppercase font-bold text-red-400 block tracking-wider">
+                        PDF Fattura Allegato:
+                      </span>
+                      <span className="font-bold text-white block truncate">
+                        {attachedPdf.fileName} ({Math.round(attachedPdf.fileSize / 1024)} KB)
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => openOrDownloadPdf(attachedPdf)}
+                      className="px-2.5 py-1 bg-red-600/30 hover:bg-red-600/40 text-red-200 border border-red-500/50 rounded-lg font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Visualizza o scarica PDF"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      <span>Visualizza</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAttachedPdf(null)}
+                      className="p-1 text-slate-400 hover:text-rose-300 rounded cursor-pointer"
+                      title="Rimuovi allegato PDF"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-slate-950/70 border border-slate-800 rounded-xl text-xs">
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <Paperclip className="h-4 w-4 text-red-400 shrink-0" />
+                    <span>Hai anche la copia di cortesia in PDF? Puoi allegarla subito (opzionale):</span>
+                  </div>
+                  <div>
+                    <input
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      id="pdf-file-input-step1"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handlePdfFileSelect(file);
+                      }}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="pdf-file-input-step1"
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-semibold flex items-center gap-1.5 cursor-pointer border border-slate-700 whitespace-nowrap shadow-sm"
+                    >
+                      <FileUp className="h-3.5 w-3.5 text-red-400" />
+                      <span>Allega Copia PDF</span>
+                    </label>
+                  </div>
+                </div>
+              )}
 
               {/* Sample Invoices for Instant Test */}
               <div>
@@ -1388,6 +1516,96 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                         </span>
                       )}
                     </span>
+                  </div>
+
+                  {/* Allegato PDF della Fattura (Richiesta: dammi la possibilità di allegare il PDF della fattura) */}
+                  <div className={`rounded-xl p-2.5 text-left min-w-[240px] shadow-sm border transition-all ${
+                    attachedPdf
+                      ? 'bg-gradient-to-br from-red-950/50 via-slate-900 to-red-900/30 border-red-500/70 shadow-red-950/30 ring-1 ring-red-500/30'
+                      : 'bg-slate-900 border-slate-700/80'
+                  }`}>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
+                        <FileText className={`h-3 w-3 ${attachedPdf ? 'text-red-400' : 'text-slate-400'}`} />
+                        <span>Allegato PDF Fattura:</span>
+                      </span>
+                      {attachedPdf ? (
+                        <span className="text-[9px] font-black uppercase px-1.5 py-0.2 bg-red-500/20 text-red-300 rounded border border-red-500/40 flex items-center gap-0.5">
+                          ✓ ALLEGATO
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-bold uppercase px-1.5 py-0.2 bg-slate-800 text-slate-400 rounded border border-slate-700">
+                          Opzionale
+                        </span>
+                      )}
+                    </div>
+
+                    <input
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      ref={pdfInputRef}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handlePdfFileSelect(file);
+                      }}
+                      className="hidden"
+                    />
+
+                    {attachedPdf ? (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-1 text-xs">
+                          <span className="font-bold text-white truncate max-w-[150px]" title={attachedPdf.fileName}>
+                            {attachedPdf.fileName}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {Math.round(attachedPdf.fileSize / 1024)} KB
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openOrDownloadPdf(attachedPdf)}
+                            className="flex-1 py-1 px-2 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-500 text-white flex items-center justify-center gap-1 cursor-pointer transition-colors shadow-sm"
+                            title="Apri o scarica il PDF della fattura"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                            <span>Apri PDF</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => pdfInputRef.current?.click()}
+                            className="p-1 text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg cursor-pointer border border-slate-700"
+                            title="Sostituisci il PDF con un altro file"
+                          >
+                            <Edit3 className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAttachedPdf(null)}
+                            className="p-1 text-rose-300 hover:text-rose-200 bg-rose-950/40 hover:bg-rose-900/60 rounded-lg cursor-pointer border border-rose-900/40"
+                            title="Rimuovi allegato PDF"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <button
+                          type="button"
+                          disabled={isUploadingPdf}
+                          onClick={() => pdfInputRef.current?.click()}
+                          className="w-full py-1.5 px-2.5 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-600 hover:border-slate-500 flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
+                          title="Allega il PDF della fattura per visualizzarlo nei cantieri e nei sospesi"
+                        >
+                          <FileUp className="h-3.5 w-3.5 text-red-400" />
+                          <span>{isUploadingPdf ? 'Caricamento PDF...' : 'Allega PDF Fattura'}</span>
+                        </button>
+                        <span className="text-[10px] text-slate-400 block mt-1">
+                          Sarà allegato ai movimenti e ai sospesi
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="pl-4 border-l border-slate-800 text-right">

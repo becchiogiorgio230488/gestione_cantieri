@@ -22,13 +22,17 @@ import {
   AlertTriangle,
   Layers,
   ArrowRightLeft,
+  FileText,
+  Paperclip,
 } from 'lucide-react';
-import { Cantiere, Movement, SospesoItem } from '../types';
+import { Cantiere, Movement, SospesoItem, AttachmentPdf } from '../types';
 import { calculateCantiereTotals, formatCurrency, formatDateItalian, getTodayISODate } from '../utils/calculations';
 import { exportSingleCantiereExcel } from '../utils/excelExport';
 import { ConfirmModal } from './ConfirmModal';
 import { findLinkedInvoiceMovementsAcrossCantieri } from '../utils/invoiceDuplicateHelper';
 import { CantiereSearchSelect } from './CantiereSearchSelect';
+import { openOrDownloadPdf } from '../utils/pdfStorage';
+import { PdfAttachmentModal } from './PdfAttachmentModal';
 
 interface SchedaCantiereViewProps {
   cantiere: Cantiere;
@@ -38,6 +42,11 @@ interface SchedaCantiereViewProps {
   onBack: () => void;
   onSelectCantiere: (id: string) => void;
   onUpdateCantiere: (updated: Cantiere) => void;
+  onUpdateMovementPdf?: (
+    cantiereId: string,
+    movement: Movement,
+    newPdf: AttachmentPdf | null
+  ) => void;
   onDeleteMovement?: (cantiereId: string, movementId: string) => void;
   onDeleteMovementFromAllCantieri?: (
     cantiereId: string,
@@ -61,6 +70,7 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
   onBack,
   onSelectCantiere,
   onUpdateCantiere,
+  onUpdateMovementPdf,
   onDeleteMovement,
   onDeleteMovementFromAllCantieri,
   onMoveToSospesi,
@@ -71,6 +81,26 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
   onPrint,
 }) => {
   const totals = calculateCantiereTotals(cantiere);
+
+  // Modal for managing (adding, modifying, removing) PDF on a DDT / movement
+  const [managingPdfMovement, setManagingPdfMovement] = useState<Movement | null>(null);
+
+  const handleSavePdf = (newPdf: AttachmentPdf | null) => {
+    if (!managingPdfMovement) return;
+    if (onUpdateMovementPdf) {
+      onUpdateMovementPdf(cantiere.id, managingPdfMovement, newPdf);
+    } else {
+      // Local fallback
+      onUpdateCantiere({
+        ...cantiere,
+        movements: cantiere.movements.map((m) =>
+          m.id === managingPdfMovement.id ? { ...m, attachmentPdf: newPdf || undefined } : m
+        ),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    setManagingPdfMovement(null);
+  };
 
   // Modal for Movement / DDT removal: choose between 1) Sospesi, 2) Other cantiere, 3) Permanent deletion
   const [movementActionData, setMovementActionData] = useState<{
@@ -1045,17 +1075,50 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
 
                       {/* N° DOC. */}
                       <td className="py-3 px-3.5 whitespace-nowrap font-medium text-white">
-                        {m.docNumber}
-                        {m.source === 'xml' && (
-                          <span className="ml-1.5 px-1 py-0.2 rounded text-[9px] uppercase font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                            XML
-                          </span>
-                        )}
-                        {m.source === 'fattura_emessa' && (
-                          <span className="ml-1.5 px-1 py-0.2 rounded text-[9px] uppercase font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30">
-                            EMESSA
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>{m.docNumber}</span>
+                          {m.source === 'xml' && (
+                            <span className="px-1 py-0.2 rounded text-[9px] uppercase font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                              XML
+                            </span>
+                          )}
+                          {m.source === 'fattura_emessa' && (
+                            <span className="px-1 py-0.2 rounded text-[9px] uppercase font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30">
+                              EMESSA
+                            </span>
+                          )}
+                          {m.attachmentPdf ? (
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => openOrDownloadPdf(m.attachmentPdf!)}
+                                className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30 flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                                title={`Visualizza/scarica copia PDF fattura (${m.attachmentPdf.fileName})`}
+                              >
+                                <FileText className="h-3 w-3 text-red-400" />
+                                <span>PDF</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setManagingPdfMovement(m)}
+                                className="p-0.5 text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700 rounded transition-colors cursor-pointer"
+                                title="Modifica, sostituisci o rimuovi il PDF allegato"
+                              >
+                                <Paperclip className="h-3 w-3 text-red-400" />
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setManagingPdfMovement(m)}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-semibold text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                              title="Allega copia PDF della fattura a questo DDT (si sincronizzerà su tutti i cantieri collegati)"
+                            >
+                              <Paperclip className="h-3 w-3 text-slate-400 hover:text-red-400" />
+                              <span>+ PDF</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
 
                       {/* TIPO DOC. / FORNITORE / CLIENTE */}
@@ -1098,6 +1161,22 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                       {/* AZIONI */}
                       <td className="py-3 px-3 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setManagingPdfMovement(m)}
+                            className={`p-1 rounded transition-colors cursor-pointer ${
+                              m.attachmentPdf
+                                ? 'text-red-400 hover:text-red-300 hover:bg-red-500/10'
+                                : 'text-slate-400 hover:text-red-400'
+                            }`}
+                            title={
+                              m.attachmentPdf
+                                ? `Gestisci PDF allegato (${m.attachmentPdf.fileName})`
+                                : 'Allega PDF della fattura a questo DDT'
+                            }
+                          >
+                            <Paperclip className="h-3.5 w-3.5" />
+                          </button>
                           {onMoveToSospesi && m.purchases !== 0 && (
                             <button
                               onClick={() => onMoveToSospesi(m)}
@@ -1537,6 +1616,18 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
           onCancel={() => setIsConfirmDeleteCantiereOpen(false)}
         />
       )}
+
+      {/* Modal for PDF Management on DDT / Movement with multi-cantiere sync */}
+      <PdfAttachmentModal
+        isOpen={!!managingPdfMovement}
+        onClose={() => setManagingPdfMovement(null)}
+        movement={managingPdfMovement}
+        currentCantiereId={cantiere.id}
+        currentCantiereName={cantiere.name}
+        allCantieri={allCantieri}
+        sospesi={sospesi}
+        onSavePdf={handleSavePdf}
+      />
     </div>
   );
 };
