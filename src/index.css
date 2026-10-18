@@ -39,7 +39,13 @@
   }
 
   @page {
-    margin: 1cm;
+    margin: 8mm 10mm 8mm 10mm;
     size: A4 portrait;
+  }
+
+  /* Prevent extra blank pages */
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
   }
 }

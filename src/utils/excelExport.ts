@@ -68,7 +68,22 @@ export function buildCantiereDetailSheet(
     .slice(0, 25);
 
   const ws = workbook.addWorksheet(safeSheetName, {
-    views: [{ showGridLines: true }]
+    views: [{ showGridLines: true }],
+    pageSetup: {
+      paperSize: 9, // A4
+      orientation: 'portrait',
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 1,
+      margins: {
+        left: 0.4,
+        right: 0.4,
+        top: 0.4,
+        bottom: 0.4,
+        header: 0.2,
+        footer: 0.2,
+      },
+    },
   });
 
   // 6 Columns: DATA DOC., N° DOC., TIPO DOC. / FORNITORE / CLIENTE, N./PROT, ACQUISTI, EMESSE
@@ -85,8 +100,8 @@ export function buildCantiereDetailSheet(
   // HEADER BLOCKS (Rows 1 to 4)
   // CANTIERE: [Nome Cantiere]
   // DITTA: [Nome Ditta]
-  // CITTA': [Città]
-  // DEL: [Data] | ANNO: [Anno]
+  // CITTA': [Città - Indirizzo]
+  // DEL: [Nome Committente CENTRATO] | DATA: [Data]
   // -------------------------------------------------------------
   const nomeCantiere = (cantiere.name || '').toUpperCase();
   const cittaCantiere = (cantiere.city || '').toUpperCase();
@@ -107,8 +122,8 @@ export function buildCantiereDetailSheet(
   row2.height = 24;
   ws.mergeCells('B2:D2');
 
-  // Row 3: DEL: [Data] | COMMITTENTE: [Cliente]
-  const row3 = ws.addRow(['DEL:', dataStampa, '', '', 'COMMITTENTE:', clienteNome]);
+  // Row 3: DEL: [Nome Committente CENTRATO] | DATA: [Data emissione]
+  const row3 = ws.addRow(['DEL:', clienteNome, '', '', 'DATA:', dataStampa]);
   row3.height = 24;
   ws.mergeCells('B3:D3');
 
@@ -124,7 +139,8 @@ export function buildCantiereDetailSheet(
     // Left value (col B:D)
     const cellB = ws.getCell(`B${r}`);
     cellB.font = { name: 'Calibri', size: 10, bold: true };
-    cellB.alignment = { vertical: 'middle', horizontal: 'left' };
+    // Committente in row 3 is centered as requested
+    cellB.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : 'left' };
     cellB.border = thinBlackBorder;
     ws.getCell(`C${r}`).border = thinBlackBorder;
     ws.getCell(`D${r}`).border = thinBlackBorder;
@@ -226,8 +242,8 @@ export function buildCantiereDetailSheet(
     });
   }
 
-  // Ensure minimum empty rows for a realistic grid
-  const minRows = Math.max(movements.length, 6);
+  // Ensure minimum empty rows to fill the full A4 page when there are few movements
+  const minRows = Math.max(movements.length, 16);
   for (let i = movements.length; i < minRows; i++) {
     const emptyRow = ws.addRow(['', '', '', '', 0, 0]);
     emptyRow.height = 20;

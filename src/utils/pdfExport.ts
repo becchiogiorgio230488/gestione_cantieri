@@ -85,18 +85,25 @@ export function buildCantierePdfDoc(cantiere: Cantiere, dittaName?: string): jsP
   doc.setFont('helvetica', 'bold');
   doc.text(String(anno), 142, 27);
 
-  // Row 3 inside Header Box
+  // Row 3 inside Header Box: DEL [Nome Committente CENTRATO] | DATA [Data Stampa]
   doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(30, 41, 59);
   doc.text('DEL:', 18, 35);
-  doc.setFont('helvetica', 'normal');
-  doc.text(dataStampa, 42, 35);
 
-  if (cantiere.client) {
-    doc.setFont('helvetica', 'bold');
-    doc.text('CLIENTE:', 125, 35);
-    doc.setFont('helvetica', 'normal');
-    doc.text(cantiere.client.toUpperCase().slice(0, 22), 142, 35);
-  }
+  const committente = (cantiere.client || cantiere.name || '').toUpperCase();
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(15, 23, 42);
+  const truncatedCommittente = committente.length > 34 ? committente.slice(0, 34) + '...' : committente;
+  doc.text(truncatedCommittente, 72, 35, { align: 'center' });
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(30, 41, 59);
+  doc.text('DATA:', 125, 35);
+  doc.setFont('helvetica', 'normal');
+  doc.text(dataStampa, 142, 35);
 
   // Movements Table Rows
   const tableRows: any[] = [];
@@ -129,6 +136,13 @@ export function buildCantierePdfDoc(cantiere: Cantiere, dittaName?: string): jsP
     ]);
   }
 
+  // 3. Righe vuote per riempire l'intera pagina A4 se ci sono pochi movimenti
+  const minRows = 16;
+  const emptyRowsNeeded = Math.max(0, minRows - sortedMovements.length);
+  for (let i = 0; i < emptyRowsNeeded; i++) {
+    tableRows.push(['', '', '', '', '', '']);
+  }
+
   // AutoTable
   autoTable(doc, {
     startY: 44,
@@ -149,7 +163,7 @@ export function buildCantierePdfDoc(cantiere: Cantiere, dittaName?: string): jsP
     styles: {
       font: 'helvetica',
       fontSize: 8,
-      cellPadding: 2,
+      cellPadding: 1.8,
       lineWidth: 0.1,
       lineColor: [203, 213, 225],
       textColor: [30, 41, 59],
@@ -174,7 +188,7 @@ export function buildCantierePdfDoc(cantiere: Cantiere, dittaName?: string): jsP
   });
 
   // Final Totals Table / Box below the main table
-  const finalY = (doc as any).lastAutoTable ? (doc as any).lastAutoTable.finalY + 4 : 200;
+  const finalY = (doc as any).lastAutoTable ? (doc as any).lastAutoTable.finalY + 3 : 190;
 
   autoTable(doc, {
     startY: finalY,
@@ -194,8 +208,8 @@ export function buildCantierePdfDoc(cantiere: Cantiere, dittaName?: string): jsP
     styles: {
       font: 'helvetica',
       fontStyle: 'bold',
-      fontSize: 8.5,
-      cellPadding: 2.5,
+      fontSize: 8,
+      cellPadding: 2,
       lineWidth: 0.3,
       lineColor: [30, 41, 59],
     },
@@ -205,6 +219,33 @@ export function buildCantierePdfDoc(cantiere: Cantiere, dittaName?: string): jsP
       2: { halign: 'right', cellWidth: 26, fillColor: [241, 245, 249], textColor: [15, 23, 42] },
     },
   });
+
+  const totalsFinalY = (doc as any).lastAutoTable ? (doc as any).lastAutoTable.finalY + 3 : finalY + 16;
+
+  // Margine Cantiere Box
+  doc.setDrawColor(203, 213, 225);
+  doc.setFillColor(248, 250, 252);
+  doc.rect(14, totalsFinalY, 182, 7.5, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text('MARGINE / UTILE EFFETTIVO DI CANTIERE:', 18, totalsFinalY + 5);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.text(`${formatAccountingCurrency(totals.margineEffettivo)}   (Margine: ${totals.marginePercentuale}%)`, 190, totalsFinalY + 5, { align: 'right' });
+
+  // Signatures
+  const signY = totalsFinalY + 12;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(71, 85, 105);
+  doc.text('Timbro e Firma Responsabile Cantiere:', 18, signY);
+  doc.line(18, signY + 8, 75, signY + 8);
+
+  doc.text('Firma Amministrazione / Contabilità:', 130, signY);
+  doc.line(130, signY + 8, 188, signY + 8);
 
   return doc;
 }
