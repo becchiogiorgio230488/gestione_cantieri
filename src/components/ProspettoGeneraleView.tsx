@@ -68,7 +68,7 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
   onDeleteArtigiano,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortField, setSortField] = useState<'name' | 'city' | 'address' | 'ri' | 'acquisti' | 'emesse' | 'rf'>('name');
+  const [sortField, setSortField] = useState<'name' | 'city' | 'address' | 'ri' | 'acquisti' | 'emesse' | 'rf' | 'marginePercentuale'>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [cantiereToDelete, setCantiereToDelete] = useState<Cantiere | null>(null);
   const [isConfirmDeleteArtigianoOpen, setIsConfirmDeleteArtigianoOpen] = useState(false);
@@ -188,6 +188,10 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
         acquisti,
         emesse,
         rf,
+        finalInventory: t.finalInventory,
+        margineEffettivo: t.margineEffettivo,
+        marginePercentuale: t.marginePercentuale,
+        isPositive: t.isPositive,
       };
     });
   }, [artigiano.cantieri]);
@@ -225,19 +229,34 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
     let sumAcquisti = 0;
     let sumEmesse = 0;
     let sumRF = 0;
+    let sumUtile = 0;
 
     for (const r of cantieriRows) {
       sumRI += r.ri;
       sumAcquisti += r.acquisti;
       sumEmesse += r.emesse;
       sumRF += r.rf;
+      sumUtile += r.margineEffettivo;
     }
 
+    sumRI = Math.round(sumRI * 100) / 100;
+    sumAcquisti = Math.round(sumAcquisti * 100) / 100;
+    sumEmesse = Math.round(sumEmesse * 100) / 100;
+    sumRF = Math.round(sumRF * 100) / 100;
+    sumUtile = Math.round(sumUtile * 100) / 100;
+
+    // Percentuale di margine complessiva calcolata su tutti i cantieri (ESCLUDENDO i sospesi come richiesto)
+    const ricaviDenom = sumEmesse + (sumRF > 0 ? sumRF : 0);
+    const totalMarginePercentuale =
+      ricaviDenom > 0 ? Math.round((sumUtile / ricaviDenom) * 1000) / 10 : 0;
+
     return {
-      sumRI: Math.round(sumRI * 100) / 100,
-      sumAcquisti: Math.round(sumAcquisti * 100) / 100,
-      sumEmesse: Math.round(sumEmesse * 100) / 100,
-      sumRF: Math.round(sumRF * 100) / 100,
+      sumRI,
+      sumAcquisti,
+      sumEmesse,
+      sumRF,
+      sumUtile,
+      totalMarginePercentuale,
       count: cantieriRows.length,
     };
   }, [cantieriRows]);
@@ -653,6 +672,22 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
                   </div>
                 </th>
 
+                {/* % MARGINE / UTILE */}
+                <th
+                  onClick={() => handleSort('marginePercentuale')}
+                  className="py-3.5 px-3.5 text-right w-28 cursor-pointer hover:text-white transition-colors text-amber-400"
+                  title="Percentuale di margine / utile sul lavoro del cantiere"
+                >
+                  <div className="flex items-center justify-end gap-1.5">
+                    <span>% UTILE</span>
+                    {sortField === 'marginePercentuale' && (
+                      <span className="text-amber-400 font-mono text-[10px]">
+                        {sortDirection === 'asc' ? '▲' : '▼'}
+                      </span>
+                    )}
+                  </div>
+                </th>
+
                 {/* AZIONI */}
                 <th className="py-3.5 px-3 text-right w-24">AZIONI</th>
               </tr>
@@ -661,7 +696,7 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
             <tbody className="divide-y divide-slate-800 text-slate-300">
               {filteredAndSortedCantieri.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-500">
+                  <td colSpan={9} className="py-12 text-center text-slate-500">
                     <Building className="h-8 w-8 text-slate-600 mx-auto mb-2" />
                     <p className="font-semibold text-slate-300">Nessun cantiere trovato</p>
                     <p className="text-xs text-slate-500 mt-0.5">
@@ -814,6 +849,26 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
                         {row.rf > 0 ? formatCurrency(row.rf) : '-'}
                       </td>
 
+                      {/* % MARGINE / UTILE CANTIERE */}
+                      <td className="py-3.5 px-3.5 text-right font-mono font-bold whitespace-nowrap">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-black font-mono ${
+                            row.marginePercentuale >= 25
+                              ? 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20'
+                              : row.marginePercentuale >= 10
+                              ? 'text-amber-400 bg-amber-500/10 border border-amber-500/20'
+                              : row.marginePercentuale > 0
+                              ? 'text-blue-300 bg-blue-500/10 border border-blue-500/20'
+                              : row.marginePercentuale === 0
+                              ? 'text-slate-400 bg-slate-800/40 border border-slate-700/40'
+                              : 'text-rose-400 bg-rose-500/10 border border-rose-500/20'
+                          }`}
+                          title={`Utile netto: ${row.margineEffettivo >= 0 ? '+' : ''}${formatCurrency(row.margineEffettivo)}`}
+                        >
+                          {row.marginePercentuale > 0 ? `+${row.marginePercentuale}%` : `${row.marginePercentuale}%`}
+                        </span>
+                      </td>
+
                       {/* AZIONI */}
                       <td
                         className="py-3.5 px-3 text-right whitespace-nowrap"
@@ -876,6 +931,7 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
                 </td>
                 <td className="py-3 px-3.5 text-right font-mono text-slate-400">-</td>
                 <td className="py-3 px-3.5 text-right font-mono text-slate-400">-</td>
+                <td className="py-3 px-3.5 text-right font-mono text-slate-500 font-bold">-</td>
                 <td className="py-3 px-3"></td>
               </tr>
             </tbody>
@@ -913,6 +969,28 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
                   {formatCurrency(cantieriTotals.sumRF)}
                 </td>
 
+                {/* Totale % MARGINE / UTILE CANTIERI (ESCLUSI SOSPESI) */}
+                <td className="py-4 px-3.5 text-right font-mono font-black text-sm whitespace-nowrap">
+                  <span
+                    className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs sm:text-sm font-black font-mono shadow-sm ${
+                      cantieriTotals.totalMarginePercentuale >= 25
+                        ? 'text-emerald-300 bg-emerald-500/20 border border-emerald-500/30'
+                        : cantieriTotals.totalMarginePercentuale >= 10
+                        ? 'text-amber-300 bg-amber-500/20 border border-amber-500/30'
+                        : cantieriTotals.totalMarginePercentuale > 0
+                        ? 'text-blue-300 bg-blue-500/20 border border-blue-500/30'
+                        : cantieriTotals.totalMarginePercentuale === 0
+                        ? 'text-slate-300 bg-slate-800 border border-slate-700'
+                        : 'text-rose-300 bg-rose-500/20 border border-rose-500/30'
+                    }`}
+                    title={`Margine complessivo totale cantieri: ${cantieriTotals.sumUtile >= 0 ? '+' : ''}${formatCurrency(cantieriTotals.sumUtile)} (Sospesi esclusi)`}
+                  >
+                    {cantieriTotals.totalMarginePercentuale > 0
+                      ? `+${cantieriTotals.totalMarginePercentuale}%`
+                      : `${cantieriTotals.totalMarginePercentuale}%`}
+                  </span>
+                </td>
+
                 <td className="py-4 px-3"></td>
               </tr>
             </tfoot>
@@ -924,7 +1002,7 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
           <div className="flex items-center gap-2">
             <HelpCircle className="h-4 w-4 text-amber-400 shrink-0" />
             <span>
-              Clicca su qualunque riga per accedere alla <strong>Scheda Dettaglio Cantiere</strong>. La colonna <strong>R.F.</strong> è valorizzata automaticamente come <em>(R.I. + Acquisti - Emesse)</em> quando le emesse sono inferiori ai costi.
+              Clicca su qualunque riga per accedere alla <strong>Scheda Dettaglio Cantiere</strong>. La colonna <strong>% UTILE</strong> indica la redditività calcolata su ciascun cantiere, e a fondo tabella la percentuale complessiva di tutti i cantieri (esclusi sospesi).
             </span>
           </div>
         </div>
