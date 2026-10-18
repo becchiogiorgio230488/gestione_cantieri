@@ -827,12 +827,17 @@ export default function App() {
     let nextCantieri: Cantiere[];
 
     if (isNewCantiere || !cantiereData.id) {
+      const cleanName = (cantiereData.name || '').trim().toUpperCase();
+      const cleanCity = (cantiereData.city || '').trim().toUpperCase();
+      const cleanAddress = (cantiereData.address || '').trim().toUpperCase();
+      const cleanClient = (cantiereData.client || '').trim().toUpperCase();
+
       targetCantiere = {
         id: `cantiere-${Date.now()}`,
-        name: cantiereData.name.trim().toUpperCase(),
-        city: cantiereData.city.trim().toUpperCase(),
-        address: cantiereData.address.trim().toUpperCase() || undefined,
-        client: cantiereData.client.trim().toUpperCase() || cantiereData.name.trim().toUpperCase(),
+        name: cleanName || cleanAddress || 'CANTIERE',
+        city: cleanCity,
+        address: cleanAddress || undefined,
+        client: cleanClient || cleanName,
         date: new Date().toISOString().slice(0, 10),
         year: cantiereData.year || targetArt.year || 2026,
         initialInventory: cantiereData.initialInventory || 0,

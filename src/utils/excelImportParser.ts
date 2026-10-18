@@ -271,6 +271,29 @@ export function parseSingolaSchedaExcel(
   let year = new Date().getFullYear();
   let initialInventory = 0;
 
+  // Helper to get non-empty cell value to the right in the same row
+  const extractCellRightValue = (row: any[], startCol: number): string => {
+    for (let offset = 1; startCol + offset < row.length; offset++) {
+      const raw = row[startCol + offset];
+      if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+        const strVal = String(raw).trim();
+        const upperVal = strVal.toUpperCase();
+        if (
+          upperVal.startsWith('DITTA') ||
+          upperVal.startsWith('ANNO') ||
+          upperVal.startsWith('DATA') ||
+          upperVal.startsWith('DEL') ||
+          upperVal.startsWith('CITTA') ||
+          upperVal.startsWith('CANTIERE')
+        ) {
+          return '';
+        }
+        return strVal;
+      }
+    }
+    return '';
+  };
+
   // Header extraction from top rows (0 to 9)
   for (let r = 0; r < Math.min(rawRows.length, 10); r++) {
     const row = rawRows[r] || [];
@@ -278,83 +301,62 @@ export function parseSingolaSchedaExcel(
       const cellText = String(row[c] || '').trim();
       const upper = cellText.toUpperCase();
 
+      // INDIRIZZO: dalla cella a destra di "CANTIERE:" (se è vuoto lo lasci vuoto)
       if (upper === 'CANTIERE:' || upper === 'CANTIERE') {
-        const nextVal = String(row[c + 1] || '').trim();
-        if (nextVal) cantiereName = nextVal;
-      } else if (upper.startsWith('CANTIERE:')) {
-        const val = cellText.substring(9).trim();
-        if (val) cantiereName = val;
+        address = extractCellRightValue(row, c);
+      } else if (upper.startsWith('CANTIERE:') && cellText.includes(':')) {
+        address = cellText.substring(cellText.indexOf(':') + 1).trim();
       }
 
-      if (upper === 'DITTA:' || upper === 'DITTA') {
-        const nextVal = String(row[c + 1] || '').trim();
-        if (nextVal) dittaName = nextVal;
-      } else if (upper.startsWith('DITTA:')) {
-        const val = cellText.substring(6).trim();
-        if (val) dittaName = val;
+      // CITTA': dalla cella a destra di "CITTA'" (se è vuoto lo lasci vuoto)
+      if (upper === "CITTA':" || upper === 'CITTA:' || upper === "CITTA'" || upper === 'CITTA') {
+        city = extractCellRightValue(row, c);
+      } else if ((upper.startsWith("CITTA':") || upper.startsWith('CITTA:')) && cellText.includes(':')) {
+        city = cellText.substring(cellText.indexOf(':') + 1).trim();
       }
 
-      if (upper === 'CITTA\':' || upper === 'CITTA:' || upper === 'CITTA') {
-        const nextVal = String(row[c + 1] || '').trim();
-        if (nextVal) {
-          if (nextVal.includes(' - ')) {
-            const parts = nextVal.split(' - ');
-            city = parts[0].trim();
-            address = parts.slice(1).join(' - ').trim();
-          } else {
-            city = nextVal;
-          }
-        }
-      } else if (upper.startsWith('CITTA\':') || upper.startsWith('CITTA:')) {
-        const val = cellText.replace(/^CITTA[':]+/i, '').trim();
-        if (val) {
-          if (val.includes(' - ')) {
-            const parts = val.split(' - ');
-            city = parts[0].trim();
-            address = parts.slice(1).join(' - ').trim();
-          } else {
-            city = val;
-          }
-        }
-      }
-
+      // NOME CANTIERE E COMMITTENTE: dalla cella a destra di "DEL:" (se è vuoto lo lasci vuoto)
       if (upper === 'DEL:' || upper === 'DEL') {
-        const nextVal = String(row[c + 1] || '').trim();
-        if (nextVal) committente = nextVal;
-      } else if (upper.startsWith('DEL:')) {
-        const val = cellText.substring(4).trim();
-        if (val) committente = val;
+        const val = extractCellRightValue(row, c);
+        cantiereName = val;
+        committente = val;
+      } else if (upper.startsWith('DEL:') && cellText.includes(':')) {
+        const val = cellText.substring(cellText.indexOf(':') + 1).trim();
+        cantiereName = val;
+        committente = val;
       }
 
+      // DITTA: dalla cella a destra di "DITTA:"
+      if (upper === 'DITTA:' || upper === 'DITTA') {
+        dittaName = extractCellRightValue(row, c);
+      } else if (upper.startsWith('DITTA:') && cellText.includes(':')) {
+        dittaName = cellText.substring(cellText.indexOf(':') + 1).trim();
+      }
+
+      // ANNO: dalla cella a destra di "ANNO:"
       if (upper === 'ANNO:' || upper === 'ANNO') {
-        const nextVal = parseInt(String(row[c + 1] || ''), 10);
+        const rawAnno = extractCellRightValue(row, c);
+        const nextVal = parseInt(rawAnno, 10);
         if (!isNaN(nextVal) && nextVal > 2000 && nextVal < 2100) year = nextVal;
-      } else if (upper.startsWith('ANNO:')) {
-        const nextVal = parseInt(cellText.substring(5).trim(), 10);
+      } else if (upper.startsWith('ANNO:') && cellText.includes(':')) {
+        const nextVal = parseInt(cellText.substring(cellText.indexOf(':') + 1).trim(), 10);
         if (!isNaN(nextVal) && nextVal > 2000 && nextVal < 2100) year = nextVal;
       }
     }
   }
 
-  // Fallbacks if header cells were formatted differently
-  if (!cantiereName) {
-    if (fileName) {
-      cantiereName = fileName.replace(/\.[^/.]+$/, '').replace(/_/g, ' ');
-    } else {
-      cantiereName = 'Nuovo Cantiere Importato';
-    }
-  }
-  if (!city) {
-    city = 'Milano';
-  }
-  if (!committente) {
-    committente = cantiereName;
-  }
+  // If cells are empty, leave them empty as requested (no artificial fallbacks)
 
-  // Locate Table Header row (e.g. DATA DOC., N° DOC., ACQUISTI, EMESSE)
+  // Standard columns in Singola Scheda Cantiere XLS:
+  // Colonna A (0): DATA DOC.
+  // Colonna B (1): N° DOC. (il N° DOC va preso rigorosamente dalla Colonna B)
+  // Colonna C (2): TIPO DOC. / FORNITORE / CLIENTE
+  // Colonna D (3): N./PROT
+  // Colonna E (4): ACQUISTI
+  // Colonna F (5): EMESSE
   let headerRowIndex = -1;
   let colDate = 0;
-  let colDocNum = 1;
+  const colDocNum = 1; // Colonna B (indice 1) del foglio XLS
   let colTypeSubject = 2;
   let colProt = 3;
   let colAcquisti = 4;
@@ -366,20 +368,32 @@ export function parseSingolaSchedaExcel(
     
     // Check if this row looks like the movement columns header
     const hasData = upperRow.some((c) => c.includes('DATA'));
-    const hasDoc = upperRow.some((c) => c.includes('DOC'));
+    const hasDoc = upperRow.some((c) => c.includes('DOC') || c.includes('N°'));
     const hasAcquisti = upperRow.some((c) => c.includes('ACQUISTI') || c.includes('COSTI'));
     const hasEmesse = upperRow.some((c) => c.includes('EMESSE') || c.includes('RICAVI'));
 
     if ((hasData && hasDoc) || (hasAcquisti && hasEmesse)) {
       headerRowIndex = r;
-      // Map column indexes dynamically
+      // Map other column indexes dynamically if they vary, keeping colDocNum fixed to 1 (Colonna B)
       upperRow.forEach((c, idx) => {
-        if (c.includes('DATA')) colDate = idx;
-        else if (c.includes('N°') || c.includes('N.') || c.includes('DOC.')) colDocNum = idx;
-        else if (c.includes('TIPO') || c.includes('FORNITORE') || c.includes('CLIENTE') || c.includes('DESCRIZIONE')) colTypeSubject = idx;
-        else if (c.includes('PROT')) colProt = idx;
-        else if (c.includes('ACQUISTI') || c.includes('COSTI') || c.includes('USCITE')) colAcquisti = idx;
-        else if (c.includes('EMESSE') || c.includes('RICAVI') || c.includes('ENTRATE')) colEmesse = idx;
+        if (idx === 1) return; // Colonna B is strictly N° DOC
+        if (c.includes('DATA')) {
+          colDate = idx;
+        } else if (c.includes('PROT')) {
+          colProt = idx;
+        } else if (
+          c.includes('TIPO') ||
+          c.includes('FORNITORE') ||
+          c.includes('CLIENTE') ||
+          c.includes('DESCRIZIONE') ||
+          c.includes('OGGETTO')
+        ) {
+          colTypeSubject = idx;
+        } else if (c.includes('ACQUISTI') || c.includes('COSTI') || c.includes('USCITE')) {
+          colAcquisti = idx;
+        } else if (c.includes('EMESSE') || c.includes('RICAVI') || c.includes('ENTRATE')) {
+          colEmesse = idx;
+        }
       });
       break;
     }
@@ -404,6 +418,17 @@ export function parseSingolaSchedaExcel(
       continue;
     }
 
+    // N° DOC preso direttamente dalla Colonna B (indice 1) del foglio XLS
+    const rawDocVal = row[1];
+    let docNumber = '';
+    if (rawDocVal !== undefined && rawDocVal !== null) {
+      if (typeof rawDocVal === 'number') {
+        docNumber = String(rawDocVal);
+      } else {
+        docNumber = String(rawDocVal).trim();
+      }
+    }
+
     const colSubjectVal = String(row[colTypeSubject] || '').trim();
     const isRI = colSubjectVal.toUpperCase().includes('RIMANENZE INIZIALI') ||
                  colSubjectVal.toUpperCase().includes('R.I.') ||
@@ -418,7 +443,7 @@ export function parseSingolaSchedaExcel(
       movements.push({
         id: `imp-ri-${r}-${Date.now()}`,
         date: parseExcelDate(row[colDate]),
-        docNumber: String(row[colDocNum] || '').trim() || 'R.I.',
+        docNumber: docNumber || 'R.I.',
         typeAndSubject: 'RIMANENZE INIZIALI (R.I.)',
         protocol: String(row[colProt] || '').trim(),
         purchases: rawPurchases,
@@ -429,8 +454,7 @@ export function parseSingolaSchedaExcel(
     }
 
     const date = parseExcelDate(row[colDate]);
-    const docNumber = String(row[colDocNum] || '').trim();
-    const typeAndSubject = colSubjectVal || String(row[colDocNum] || 'Movimento importato');
+    const typeAndSubject = colSubjectVal;
     const protocol = String(row[colProt] || '').trim();
 
     // If completely without values and descriptions, ignore

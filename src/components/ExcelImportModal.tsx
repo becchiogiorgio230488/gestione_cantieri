@@ -229,10 +229,10 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
         const isNew = selectedTargetCantiereId === 'new';
         const cantiereData = {
           id: isNew ? undefined : selectedTargetCantiereId,
-          name: customCantiereName || parseResult.singolaScheda.header.cantiereName,
-          city: customCity || parseResult.singolaScheda.header.city || 'Milano',
-          address: customAddress || parseResult.singolaScheda.header.address || '',
-          client: customCommittente || parseResult.singolaScheda.header.committente || customCantiereName,
+          name: customCantiereName !== undefined ? customCantiereName : parseResult.singolaScheda.header.cantiereName,
+          city: customCity !== undefined ? customCity : parseResult.singolaScheda.header.city,
+          address: customAddress !== undefined ? customAddress : parseResult.singolaScheda.header.address,
+          client: customCommittente !== undefined ? customCommittente : parseResult.singolaScheda.header.committente,
           year: customYear || parseResult.singolaScheda.header.year || 2026,
           initialInventory: customRI >= 0 ? customRI : parseResult.singolaScheda.header.initialInventory || 0,
         };
@@ -241,12 +241,12 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
           (m, idx) => ({
             id: `mov-imp-${Date.now()}-${idx}`,
             date: m.date,
-            docNumber: m.docNumber || 'S.N.',
+            docNumber: m.docNumber, // exact value from N° DOC. column
             typeAndSubject: m.typeAndSubject,
             protocol: m.protocol || '',
             purchases: m.purchases,
             issued: m.issued,
-            notes: m.isSpecialRI ? 'Rimanenze Iniziali importate da Excel' : 'Importato da Excel',
+            notes: m.isSpecialRI ? 'Rimanenze Iniziali importate da Excel' : undefined,
             source: 'manuale',
             attachmentPdf: undefined, // Explicitly undefined/null for historical Excel imports
           })
@@ -590,49 +590,58 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div>
                         <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                          NOME CANTIERE
+                          NOME CANTIERE <span className="text-amber-400 font-mono">(da "DEL:")</span>
                         </label>
                         <input
                           type="text"
                           value={customCantiereName}
-                          onChange={(e) => setCustomCantiereName(e.target.value)}
+                          onChange={(e) => {
+                            setCustomCantiereName(e.target.value);
+                            setCustomCommittente(e.target.value);
+                          }}
+                          placeholder="(Vuoto se assente in DEL:)"
                           className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-bold focus:outline-none focus:border-amber-400"
                         />
                       </div>
 
                       <div>
                         <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                          CITTÀ
+                          CITTÀ <span className="text-amber-400 font-mono">(da "CITTA'")</span>
                         </label>
                         <input
                           type="text"
                           value={customCity}
                           onChange={(e) => setCustomCity(e.target.value)}
+                          placeholder="(Vuota se assente in CITTA')"
                           className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400"
                         />
                       </div>
 
                       <div>
                         <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                          INDIRIZZO
+                          INDIRIZZO <span className="text-amber-400 font-mono">(da "CANTIERE:")</span>
                         </label>
                         <input
                           type="text"
                           value={customAddress}
                           onChange={(e) => setCustomAddress(e.target.value)}
                           className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400"
-                          placeholder="es. Via Roma 15"
+                          placeholder="(Vuoto se assente in CANTIERE:)"
                         />
                       </div>
 
                       <div>
                         <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                          COMMITTENTE (DEL:)
+                          COMMITTENTE <span className="text-amber-400 font-mono">(da "DEL:")</span>
                         </label>
                         <input
                           type="text"
                           value={customCommittente}
-                          onChange={(e) => setCustomCommittente(e.target.value)}
+                          onChange={(e) => {
+                            setCustomCommittente(e.target.value);
+                            setCustomCantiereName(e.target.value);
+                          }}
+                          placeholder="(Vuoto se assente in DEL:)"
                           className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400"
                         />
                       </div>
@@ -677,7 +686,7 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
                         className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-semibold focus:outline-none focus:border-emerald-400"
                       >
                         <option value="new">
-                          + Crea nuovo cantiere: "{customCantiereName || 'Nuovo Cantiere'}"
+                          + Crea nuovo cantiere: "{customCantiereName || customAddress || 'Nuovo Cantiere'}"
                         </option>
                         {targetArtigiano?.cantieri?.map((c) => (
                           <option key={c.id} value={c.id}>
