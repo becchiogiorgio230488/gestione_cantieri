@@ -97,11 +97,12 @@ export async function deletePdfFromIndexedDB(id: string): Promise<void> {
 
 /**
  * Converte un file PDF caricato da input in AttachmentPdf con dataUrl base64
+ * e carica opzionalmente su Supabase Storage se configurato
  */
 export function fileToAttachmentPdf(file: File): Promise<AttachmentPdf> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       const result = reader.result as string;
       const id = `pdf-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
       const attachment: AttachmentPdf = {
@@ -111,7 +112,20 @@ export function fileToAttachmentPdf(file: File): Promise<AttachmentPdf> {
         dataUrl: result,
         uploadedAt: new Date().toISOString(),
       };
-      // Salva asincronamente in IndexedDB
+
+      // Se Supabase Storage è configurato, prova a caricarlo sul bucket
+      try {
+        const { uploadPdfToSupabaseStorage } = await import('../services/supabaseService');
+        const uploaded = await uploadPdfToSupabaseStorage(file, file.name);
+        if (uploaded) {
+          attachment.fileUrl = uploaded.fileUrl;
+          attachment.storagePath = uploaded.storagePath;
+        }
+      } catch (uploadErr) {
+        console.warn('Upload su Supabase Storage non riuscito (fallback locale mantenuto):', uploadErr);
+      }
+
+      // Salva asincronamente in IndexedDB per resilienza offline
       savePdfToIndexedDB(attachment).catch(console.error);
       resolve(attachment);
     };
@@ -124,6 +138,21 @@ export function fileToAttachmentPdf(file: File): Promise<AttachmentPdf> {
  * Apre il PDF in una nuova scheda o triggera il download
  */
 export function openOrDownloadPdf(attachment: AttachmentPdf) {
+  // Se ha già un URL online su Supabase Storage, aprilo direttamente
+  if (attachment.fileUrl) {
+    const win = window.open(attachment.fileUrl, '_blank');
+    if (!win) {
+      const a = document.createElement('a');
+      a.href = attachment.fileUrl;
+      a.download = attachment.fileName || 'fattura.pdf';
+      a.target = '_blank';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+    return;
+  }
+
   if (!attachment.dataUrl) {
     alert('Contenuto PDF non disponibile');
     return;
@@ -160,3 +189,4 @@ export function openOrDownloadPdf(attachment: AttachmentPdf) {
     document.body.removeChild(a);
   }
 }
+

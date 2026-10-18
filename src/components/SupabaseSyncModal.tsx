@@ -29,8 +29,92 @@ interface SupabaseSyncModalProps {
   onShowNotification: (msg: string) => void;
 }
 
-const SUPABASE_SQL_SCHEMA = `-- SCHEMA SUPABASE: GESTIONE CANTIERI & CONTABILITÀ CLIENTI
--- Esegui questo script in Supabase: Dashboard -> SQL Editor -> New query -> Run
+const SUPABASE_MIGRATION_SQL = `-- ========================================================
+-- MIGRAZIONE INCREMENTALE PER DATABASE ESISTENTE (SUPABASE)
+-- Sicura: aggiunge i campi mancanti come opzionali (NULL)
+-- Non cancella e non modifica in alcun modo i dati già presenti!
+-- Esegui in Supabase: Dashboard -> SQL Editor -> New query -> Run
+-- ========================================================
+
+-- 1. Tabella MOVEMENTS (Movimenti Cantiere e DDT)
+-- Aggiunge il campo per allegare il file PDF (memorizza metadata, Base64 o URL storage)
+ALTER TABLE public.movements 
+ADD COLUMN IF NOT EXISTS attachment_pdf JSONB;
+
+-- 2. Tabella SOSPESI (Scheda Sospesi Forniture e DDT)
+-- Aggiunge:
+--  - client: nome del cliente finale assegnato al DDT
+--  - internal_note: note interne riservate (visibili a video)
+--  - attachment_pdf: allegato PDF collegato alla fornitura o DDT
+ALTER TABLE public.sospesi 
+ADD COLUMN IF NOT EXISTS client TEXT;
+
+ALTER TABLE public.sospesi 
+ADD COLUMN IF NOT EXISTS internal_note TEXT;
+
+ALTER TABLE public.sospesi 
+ADD COLUMN IF NOT EXISTS attachment_pdf JSONB;
+
+-- 3. BUCKET SUPABASE STORAGE: 'fatture-pdf'
+-- Crea automaticamente il bucket per conservare i file PDF caricati online
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'fatture-pdf',
+  'fatture-pdf',
+  true,
+  52428800, -- Limite 50MB per singolo PDF
+  ARRAY['application/pdf']
+)
+ON CONFLICT (id) DO UPDATE SET
+  public = true,
+  allowed_mime_types = ARRAY['application/pdf'];
+
+-- 4. POLICIES DI ACCESSO PER IL BUCKET STORAGE 'fatture-pdf'
+DO $$
+BEGIN
+  -- Permetti lettura pubblica del PDF
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Accesso pubblico lettura PDF fatture'
+  ) THEN
+    CREATE POLICY "Accesso pubblico lettura PDF fatture"
+    ON storage.objects FOR SELECT
+    USING (bucket_id = 'fatture-pdf');
+  END IF;
+
+  -- Permetti caricamento/upload del PDF
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Permetti caricamento PDF fatture'
+  ) THEN
+    CREATE POLICY "Permetti caricamento PDF fatture"
+    ON storage.objects FOR INSERT
+    WITH CHECK (bucket_id = 'fatture-pdf');
+  END IF;
+
+  -- Permetti aggiornamento/sostituzione del PDF
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Permetti modifica PDF fatture'
+  ) THEN
+    CREATE POLICY "Permetti modifica PDF fatture"
+    ON storage.objects FOR UPDATE
+    USING (bucket_id = 'fatture-pdf');
+  END IF;
+
+  -- Permetti eliminazione del PDF
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Permetti rimozione PDF fatture'
+  ) THEN
+    CREATE POLICY "Permetti rimozione PDF fatture"
+    ON storage.objects FOR DELETE
+    USING (bucket_id = 'fatture-pdf');
+  END IF;
+END $$;`;
+
+const SUPABASE_SQL_SCHEMA = `-- SCHEMA COMPLETO AGGIORNATO: GESTIONE CANTIERI & CONTABILITÀ CLIENTI
+-- Per nuova configurazione da zero su Supabase (SQL Editor -> New query -> Run)
 
 -- 1. TABELLA ARTIGIANI / CLIENTI DELLO STUDIO
 CREATE TABLE IF NOT EXISTS public.artigiani (
@@ -84,6 +168,7 @@ CREATE TABLE IF NOT EXISTS public.movements (
     notes TEXT,
     source TEXT DEFAULT 'manuale',
     xml_ref JSONB,
+    attachment_pdf JSONB,
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now())
 );
 
@@ -97,12 +182,15 @@ CREATE TABLE IF NOT EXISTS public.sospesi (
     description TEXT NOT NULL,
     amount NUMERIC(12,2) DEFAULT 0,
     protocol TEXT,
+    client TEXT,
     ddt_number TEXT,
     ddt_date TEXT,
     status TEXT DEFAULT 'in_attesa_cliente',
     customer_note TEXT,
+    internal_note TEXT,
     suggested_cantiere_id TEXT,
     source_file_name TEXT,
+    attachment_pdf JSONB,
     created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now())
 );
 
@@ -112,7 +200,7 @@ CREATE INDEX IF NOT EXISTS idx_movements_cantiere_id ON public.movements(cantier
 CREATE INDEX IF NOT EXISTS idx_sospesi_artigiano_id ON public.sospesi(artigiano_id);
 CREATE INDEX IF NOT EXISTS idx_movements_date ON public.movements(date);
 
--- ABILITAZIONE REALTIME (Aggiornamento istantaneo automatico)
+-- ABILITAZIONE REALTIME
 ALTER PUBLICATION supabase_realtime ADD TABLE public.artigiani;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.cantieri;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.movements;
@@ -127,7 +215,28 @@ ALTER TABLE public.sospesi ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Permetti accesso completo anon artigiani" ON public.artigiani FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Permetti accesso completo anon cantieri" ON public.cantieri FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Permetti accesso completo anon movements" ON public.movements FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permetti accesso completo anon sospesi" ON public.sospesi FOR ALL USING (true) WITH CHECK (true);`;
+CREATE POLICY "Permetti accesso completo anon sospesi" ON public.sospesi FOR ALL USING (true) WITH CHECK (true);
+
+-- CONFIGURAZIONE SUPABASE STORAGE PER PDF
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('fatture-pdf', 'fatture-pdf', true, 52428800, ARRAY['application/pdf'])
+ON CONFLICT (id) DO NOTHING;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Accesso pubblico lettura PDF fatture') THEN
+    CREATE POLICY "Accesso pubblico lettura PDF fatture" ON storage.objects FOR SELECT USING (bucket_id = 'fatture-pdf');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Permetti caricamento PDF fatture') THEN
+    CREATE POLICY "Permetti caricamento PDF fatture" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'fatture-pdf');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Permetti modifica PDF fatture') THEN
+    CREATE POLICY "Permetti modifica PDF fatture" ON storage.objects FOR UPDATE USING (bucket_id = 'fatture-pdf');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname = 'Permetti rimozione PDF fatture') THEN
+    CREATE POLICY "Permetti rimozione PDF fatture" ON storage.objects FOR DELETE USING (bucket_id = 'fatture-pdf');
+  END IF;
+END $$;`;
 
 export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
   artigiani,
@@ -137,6 +246,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
   onShowNotification,
 }) => {
   const [activeTab, setActiveTab] = useState<'status' | 'sql'>('status');
+  const [sqlSubTab, setSqlSubTab] = useState<'migration' | 'full'>('migration');
   const [isCopied, setIsCopied] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
@@ -148,10 +258,15 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
   const isConfigured = isSupabaseConfigured();
 
   const handleCopySql = () => {
-    navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
+    const textToCopy = sqlSubTab === 'migration' ? SUPABASE_MIGRATION_SQL : SUPABASE_SQL_SCHEMA;
+    navigator.clipboard.writeText(textToCopy);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2500);
-    onShowNotification('Schema SQL copiato negli appunti!');
+    onShowNotification(
+      sqlSubTab === 'migration'
+        ? 'Script di migrazione incrementale copiato!'
+        : 'Schema completo SQL copiato negli appunti!'
+    );
   };
 
   const handleTestConnection = async () => {
@@ -379,26 +494,73 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({
           </div>
         )}
 
-        {/* TAB 2: SQL SCHEMA */}
+        {/* TAB 2: SQL SCHEMA & MIGRATION */}
         {activeTab === 'sql' && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-slate-300">
-                Esegui questo script nel <strong>SQL Editor</strong> di Supabase per creare le tabelle e abilitare la sincronizzazione in tempo reale:
-              </p>
+          <div className="space-y-4">
+            {/* Sub-tab selection */}
+            <div className="flex items-center gap-2 p-1 bg-slate-950 rounded-lg border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSqlSubTab('migration')}
+                className={`flex-1 py-1.5 px-3 rounded text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  sqlSubTab === 'migration'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>1. Migrazione DB Esistente (Consigliato)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSqlSubTab('full')}
+                className={`flex-1 py-1.5 px-3 rounded text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  sqlSubTab === 'full'
+                    ? 'bg-slate-800 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>2. Schema Completo da Zero</span>
+              </button>
+            </div>
+
+            {/* Explanation banner */}
+            {sqlSubTab === 'migration' ? (
+              <div className="p-3 bg-emerald-950/30 border border-emerald-500/30 rounded-xl text-xs space-y-1">
+                <p className="font-bold text-emerald-300">
+                  ✓ Aggiornamento incrementale sicuro: nessun dato esistente verrà perso o alterato.
+                </p>
+                <p className="text-slate-300 text-[11px] leading-relaxed">
+                  Aggiunge in sicurezza con <code className="text-emerald-300 font-mono">ADD COLUMN IF NOT EXISTS</code> i campi <strong className="text-white">attachment_pdf</strong> (su movements e sospesi) e <strong className="text-white">client</strong> / <strong className="text-white">internal_note</strong> (su sospesi), e configura il bucket Supabase Storage <code className="text-emerald-300 font-mono">fatture-pdf</code> per conservare online i file PDF.
+                </p>
+              </div>
+            ) : (
+              <div className="p-3 bg-slate-800/40 border border-slate-700 rounded-xl text-xs space-y-1">
+                <p className="font-bold text-slate-200">
+                  Nuovo progetto o reset: crea tutte le 4 tabelle + indici + RLS + storage bucket.
+                </p>
+                <p className="text-slate-400 text-[11px] leading-relaxed">
+                  Utilizza questo script solo se stai inizializzando un database Supabase vuoto o appena creato.
+                </p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-[11px] text-slate-400 font-mono">
+                {sqlSubTab === 'migration' ? 'Script: migrazione_incrementale.sql' : 'Script: schema_completo_supabase.sql'}
+              </span>
               <button
                 type="button"
                 onClick={handleCopySql}
                 className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
               >
                 {isCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                <span>{isCopied ? 'Copiato!' : 'Copia SQL'}</span>
+                <span>{isCopied ? 'Copiato!' : 'Copia Codice SQL'}</span>
               </button>
             </div>
 
             <div className="relative">
               <pre className="bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-[11px] text-slate-300 max-h-80 overflow-y-auto leading-relaxed select-all">
-                {SUPABASE_SQL_SCHEMA}
+                {sqlSubTab === 'migration' ? SUPABASE_MIGRATION_SQL : SUPABASE_SQL_SCHEMA}
               </pre>
             </div>
           </div>

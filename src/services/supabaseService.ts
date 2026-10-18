@@ -69,6 +69,7 @@ export async function fetchAllArtigianiFromSupabase(): Promise<Artigiano[]> {
       notes: row.notes || undefined,
       source: row.source || 'manuale',
       xmlRef: row.xml_ref || undefined,
+      attachmentPdf: row.attachment_pdf || undefined,
     });
     movementsByCantiere.set(row.cantiere_id, list);
   });
@@ -117,6 +118,7 @@ export async function fetchAllArtigianiFromSupabase(): Promise<Artigiano[]> {
       internalNote: row.internal_note || undefined,
       suggestedCantiereId: row.suggested_cantiere_id || undefined,
       sourceFileName: row.source_file_name || undefined,
+      attachmentPdf: row.attachment_pdf || undefined,
       createdAt: row.created_at || new Date().toISOString(),
     });
     sospesiByArtigiano.set(row.artigiano_id, list);
@@ -220,12 +222,15 @@ export async function upsertArtigianoToSupabase(artigiano: Artigiano): Promise<v
         description: item.description,
         amount: item.amount || 0,
         protocol: item.protocol || null,
+        client: item.client || null,
         ddt_number: item.ddtNumber || null,
         ddt_date: item.ddtDate || null,
         status: item.status || 'in_attesa_cliente',
         customer_note: item.customerNote || null,
+        internal_note: item.internalNote || null,
         suggested_cantiere_id: item.suggestedCantiereId || null,
         source_file_name: item.sourceFileName || null,
+        attachment_pdf: item.attachmentPdf || null,
         created_at: item.createdAt || new Date().toISOString(),
       }));
       const { error: batchErr } = await supabase.from('sospesi').upsert(rows);
@@ -301,6 +306,7 @@ export async function upsertCantiereToSupabase(artigianoId: string, cantiere: Ca
       notes: m.notes || null,
       source: m.source || 'manuale',
       xml_ref: m.xmlRef || null,
+      attachment_pdf: m.attachmentPdf || null,
     }));
 
     const { error: movError } = await supabase.from('movements').upsert(movRows);
@@ -337,6 +343,7 @@ export async function upsertMovementToSupabase(cantiereId: string, movement: Mov
     notes: movement.notes || null,
     source: movement.source || 'manuale',
     xml_ref: movement.xmlRef || null,
+    attachment_pdf: movement.attachmentPdf || null,
   });
 
   if (error) {
@@ -401,6 +408,7 @@ export async function upsertSospesoToSupabase(artigianoId: string, item: Sospeso
     customer_note: item.customerNote || null,
     suggested_cantiere_id: item.suggestedCantiereId || null,
     source_file_name: item.sourceFileName || null,
+    attachment_pdf: item.attachmentPdf || null,
     created_at: item.createdAt || new Date().toISOString(),
   };
 
@@ -410,9 +418,11 @@ export async function upsertSospesoToSupabase(artigianoId: string, item: Sospeso
   const { error } = await supabase.from('sospesi').upsert(rowData);
 
   if (error) {
-    if (rowData.client || rowData.internal_note) {
+    // If the error was due to missing optional columns before migration, retry without them
+    if (rowData.client || rowData.internal_note || rowData.attachment_pdf) {
       delete rowData.client;
       delete rowData.internal_note;
+      delete rowData.attachment_pdf;
       const { error: retryError } = await supabase.from('sospesi').upsert(rowData);
       if (retryError) {
         console.error('Error upserting sospeso in Supabase:', retryError);
@@ -496,3 +506,48 @@ export function subscribeToRealtimeChanges(onRemoteChange: () => void): () => vo
     supabase?.removeChannel(channel);
   };
 }
+
+/**
+ * Bucket name on Supabase Storage for invoice & DDT PDF attachments
+ */
+export const SUPABASE_PDF_BUCKET = 'fatture-pdf';
+
+/**
+ * Uploads a PDF file or Blob directly to Supabase Storage and returns the public URL and path
+ */
+export async function uploadPdfToSupabaseStorage(
+  fileOrBlob: File | Blob,
+  fileName: string,
+  subFolder = 'invoices'
+): Promise<{ fileUrl: string; storagePath: string } | null> {
+  if (!supabase || !isSupabaseConfigured()) return null;
+
+  try {
+    const cleanName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = `${subFolder}/${Date.now()}_${cleanName}`;
+    const { error } = await supabase.storage
+      .from(SUPABASE_PDF_BUCKET)
+      .upload(path, fileOrBlob, {
+        contentType: 'application/pdf',
+        upsert: true,
+      });
+
+    if (error) {
+      console.warn('Errore upload PDF su Supabase Storage (verificare che il bucket esista e sia pubblico):', error);
+      return null;
+    }
+
+    const { data: urlData } = supabase.storage
+      .from(SUPABASE_PDF_BUCKET)
+      .getPublicUrl(path);
+
+    return {
+      fileUrl: urlData.publicUrl,
+      storagePath: path,
+    };
+  } catch (err) {
+    console.error('Eccezione durante upload PDF su Supabase Storage:', err);
+    return null;
+  }
+}
+

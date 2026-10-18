@@ -6,6 +6,8 @@ export interface AttachmentPdf {
   fileName: string;
   fileSize: number;
   dataUrl?: string; // Data URL Base64 "data:application/pdf;base64,..."
+  fileUrl?: string; // URL online public o signed da Supabase Storage
+  storagePath?: string; // Percorso del file nel bucket Supabase Storage (es. fatture-pdf/...)
   uploadedAt: string;
 }
 
