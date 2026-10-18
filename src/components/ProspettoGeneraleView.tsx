@@ -53,6 +53,7 @@ interface ProspettoGeneraleViewProps {
   onEditCantiere: (cantiere: Cantiere) => void;
   onDeleteCantiere: (cantiereId: string) => void;
   onOpenXmlImport: () => void;
+  onOpenExcelImport?: () => void;
   onOpenFatturaEmessa: () => void;
   onNavigateToSospesi: () => void;
   onUpdateQuadratura: (updated: QuadraturaContabile) => void;
@@ -70,6 +71,7 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
   onEditCantiere,
   onDeleteCantiere,
   onOpenXmlImport,
+  onOpenExcelImport,
   onOpenFatturaEmessa,
   onNavigateToSospesi,
   onUpdateQuadratura,
@@ -564,6 +566,19 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
               <FileUp className="h-4 w-4" />
               <span>Importa XML</span>
             </button>
+
+            {/* Excel Import */}
+            {onOpenExcelImport && (
+              <button
+                type="button"
+                onClick={onOpenExcelImport}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-teal-600 hover:bg-teal-500 text-white transition-all shadow-md cursor-pointer"
+                title="Importa vecchi cantieri, saldi o schede da file Excel (.xls / .xlsx)"
+              >
+                <FileSpreadsheet className="h-4 w-4 text-teal-200" />
+                <span>Importa da Excel</span>
+              </button>
+            )}
 
             {/* Fattura Emessa */}
             <button

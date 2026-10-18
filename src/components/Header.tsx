@@ -29,6 +29,7 @@ interface HeaderProps {
   onOpenNewCantiere?: () => void;
   onOpenFatturaEmessa?: () => void;
   onOpenXmlImport?: () => void;
+  onOpenExcelImport?: () => void;
   onOpenSupabaseSync?: () => void;
   onResetData: () => void;
 }
@@ -45,6 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigateToSospesi,
   onSelectArtigiano,
   onOpenNewArtigiano,
+  onOpenExcelImport,
   onOpenSupabaseSync,
   onResetData,
 }) => {
@@ -102,6 +104,20 @@ export const Header: React.FC<HeaderProps> = ({
               <PlusCircle className="h-4 w-4 text-slate-950" />
               <span>+ Nuovo Cliente</span>
             </button>
+
+            {/* Importa da Excel */}
+            {onOpenExcelImport && (
+              <button
+                type="button"
+                onClick={onOpenExcelImport}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold bg-emerald-700/80 hover:bg-emerald-600 text-white border border-emerald-500/40 transition-all shadow-sm cursor-pointer"
+                title="Importa vecchi cantieri e dati storici da file Excel (.xls / .xlsx)"
+              >
+                <FileSpreadsheet className="h-4 w-4 text-emerald-300" />
+                <span className="hidden sm:inline">Importa Excel</span>
+                <span className="sm:hidden">Excel</span>
+              </button>
+            )}
 
             {/* Supabase Cloud Status */}
             {onOpenSupabaseSync && (

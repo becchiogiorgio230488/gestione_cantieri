@@ -7,6 +7,7 @@ import { SospesiView } from './components/SospesiView';
 import { ArtigianoModal } from './components/ArtigianoModal';
 import { CantiereModal } from './components/CantiereModal';
 import { XmlImportModal } from './components/XmlImportModal';
+import { ExcelImportModal } from './components/ExcelImportModal';
 import { FatturaEmessaModal } from './components/FatturaEmessaModal';
 import { PrintableView } from './components/PrintableView';
 import { PrintableProspettoReport } from './components/PrintableProspettoReport';
@@ -42,6 +43,9 @@ import { isSupabaseConfigured } from './lib/supabase';
 import {
   fetchAllArtigianiFromSupabase,
   upsertArtigianoToSupabase,
+  upsertCantiereToSupabase,
+  bulkUpsertMovementsToSupabase,
+  bulkUpsertSospesiToSupabase,
   deleteArtigianoFromSupabase,
   deleteCantiereFromSupabase,
   deleteMovementFromSupabase,
@@ -76,6 +80,7 @@ export default function App() {
   const [cantiereToEdit, setCantiereToEdit] = useState<Cantiere | null>(null);
 
   const [isXmlModalOpen, setIsXmlModalOpen] = useState(false);
+  const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
   const [isFatturaEmessaModalOpen, setIsFatturaEmessaModalOpen] = useState(false);
 
   // Notification Toast
@@ -793,6 +798,217 @@ export default function App() {
     );
   };
 
+  // -------------------------------------------------------------
+  // EXCEL IMPORT HANDLERS (Singola Scheda, Sospesi, Prospetto Generale)
+  // -------------------------------------------------------------
+  const handleCommitSingolaSchedaExcel = async ({
+    targetArtigianoId,
+    cantiereData,
+    movements,
+    isNewCantiere,
+  }: {
+    targetArtigianoId: string;
+    cantiereData: {
+      id?: string;
+      name: string;
+      city: string;
+      address: string;
+      client: string;
+      year: number;
+      initialInventory: number;
+    };
+    movements: Movement[];
+    isNewCantiere: boolean;
+  }) => {
+    const targetArt = artigiani.find((a) => a.id === targetArtigianoId);
+    if (!targetArt) return;
+
+    let targetCantiere: Cantiere;
+    let nextCantieri: Cantiere[];
+
+    if (isNewCantiere || !cantiereData.id) {
+      targetCantiere = {
+        id: `cantiere-${Date.now()}`,
+        name: cantiereData.name.trim().toUpperCase(),
+        city: cantiereData.city.trim().toUpperCase(),
+        address: cantiereData.address.trim().toUpperCase() || undefined,
+        client: cantiereData.client.trim().toUpperCase() || cantiereData.name.trim().toUpperCase(),
+        date: new Date().toISOString().slice(0, 10),
+        year: cantiereData.year || targetArt.year || 2026,
+        initialInventory: cantiereData.initialInventory || 0,
+        finalInventory: 0,
+        category: targetArt.category || 'misto',
+        status: 'attivo',
+        movements: movements,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      nextCantieri = [...targetArt.cantieri, targetCantiere];
+    } else {
+      const existing = targetArt.cantieri.find((c) => c.id === cantiereData.id) || targetArt.cantieri[0];
+      const existingMovs = existing.movements || [];
+      targetCantiere = {
+        ...existing,
+        initialInventory:
+          cantiereData.initialInventory > 0
+            ? cantiereData.initialInventory
+            : existing.initialInventory,
+        movements: [...existingMovs, ...movements],
+        updatedAt: new Date().toISOString(),
+      };
+      nextCantieri = targetArt.cantieri.map((c) =>
+        c.id === targetCantiere.id ? targetCantiere : c
+      );
+    }
+
+    const updatedArt: Artigiano = {
+      ...targetArt,
+      cantieri: nextCantieri,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const nextList = artigiani.map((a) => (a.id === updatedArt.id ? updatedArt : a));
+    updateArtigianiList(nextList);
+
+    if (isSupabaseConfigured()) {
+      try {
+        await upsertCantiereToSupabase(targetArtigianoId, targetCantiere);
+        await bulkUpsertMovementsToSupabase(targetCantiere.id, targetCantiere.movements);
+      } catch (err) {
+        console.error('Supabase error saving single cantiere import:', err);
+      }
+    }
+
+    setSelectedArtigianoId(targetArtigianoId);
+    setSelectedCantiereId(targetCantiere.id);
+    setNavLevel('scheda_cantiere');
+    showNotification(
+      `Importati con successo ${movements.length} movimenti per il cantiere "${targetCantiere.name}"!`
+    );
+  };
+
+  const handleCommitSospesiExcel = async ({
+    targetArtigianoId,
+    items,
+  }: {
+    targetArtigianoId: string;
+    items: SospesoItem[];
+  }) => {
+    const targetArt = artigiani.find((a) => a.id === targetArtigianoId);
+    if (!targetArt || items.length === 0) return;
+
+    const nextSospesi = [...items, ...(targetArt.sospesi || [])];
+    const updatedArt: Artigiano = {
+      ...targetArt,
+      sospesi: nextSospesi,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const nextList = artigiani.map((a) => (a.id === updatedArt.id ? updatedArt : a));
+    updateArtigianiList(nextList);
+
+    if (isSupabaseConfigured()) {
+      try {
+        await bulkUpsertSospesiToSupabase(targetArtigianoId, items);
+      } catch (err) {
+        console.error('Supabase error saving imported sospesi:', err);
+      }
+    }
+
+    setSelectedArtigianoId(targetArtigianoId);
+    setNavLevel('scheda_sospesi');
+    showNotification(
+      `Importate con successo ${items.length} voci nella Scheda Sospesi di ${targetArt.name}!`
+    );
+  };
+
+  const handleCommitProspettoGeneraleExcel = async ({
+    targetArtigianoId,
+    cantieri,
+  }: {
+    targetArtigianoId: string;
+    cantieri: Array<{
+      name: string;
+      city: string;
+      address: string;
+      client: string;
+      initialInventory: number;
+      finalInventory: number;
+    }>;
+  }) => {
+    const targetArt = artigiani.find((a) => a.id === targetArtigianoId);
+    if (!targetArt || cantieri.length === 0) return;
+
+    const currentCantieri = [...targetArt.cantieri];
+    const updatedOrCreatedList: Cantiere[] = [];
+
+    for (const item of cantieri) {
+      const cleanName = item.name.trim().toUpperCase();
+      const existingIdx = currentCantieri.findIndex(
+        (c) => c.name.trim().toUpperCase() === cleanName
+      );
+
+      if (existingIdx !== -1) {
+        const existing = currentCantieri[existingIdx];
+        const updated: Cantiere = {
+          ...existing,
+          city: item.city ? item.city.trim().toUpperCase() : existing.city,
+          address: item.address ? item.address.trim().toUpperCase() : existing.address,
+          client: item.client ? item.client.trim().toUpperCase() : existing.client,
+          initialInventory: item.initialInventory,
+          finalInventory: item.finalInventory,
+          updatedAt: new Date().toISOString(),
+        };
+        currentCantieri[existingIdx] = updated;
+        updatedOrCreatedList.push(updated);
+      } else {
+        const newC: Cantiere = {
+          id: `cantiere-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+          name: cleanName,
+          city: item.city ? item.city.trim().toUpperCase() : 'MILANO',
+          address: item.address ? item.address.trim().toUpperCase() : undefined,
+          client: item.client ? item.client.trim().toUpperCase() : cleanName,
+          date: new Date().toISOString().slice(0, 10),
+          year: targetArt.year || 2026,
+          initialInventory: item.initialInventory || 0,
+          finalInventory: item.finalInventory || 0,
+          category: targetArt.category || 'misto',
+          status: 'attivo',
+          movements: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        currentCantieri.push(newC);
+        updatedOrCreatedList.push(newC);
+      }
+    }
+
+    const updatedArt: Artigiano = {
+      ...targetArt,
+      cantieri: currentCantieri,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const nextList = artigiani.map((a) => (a.id === updatedArt.id ? updatedArt : a));
+    updateArtigianiList(nextList);
+
+    if (isSupabaseConfigured()) {
+      try {
+        for (const c of updatedOrCreatedList) {
+          await upsertCantiereToSupabase(targetArtigianoId, c);
+        }
+      } catch (err) {
+        console.error('Supabase error saving prospetto generale cantieri:', err);
+      }
+    }
+
+    setSelectedArtigianoId(targetArtigianoId);
+    setNavLevel('prospetto_cantieri');
+    showNotification(
+      `Importate/Aggiornate con successo ${cantieri.length} schede cantieri dal Prospetto Generale!`
+    );
+  };
+
   // Move an existing movement from a cantiere back to Scheda Sospesi
   const handleMoveMovementToSospesi = (cantiereId: string, movement: Movement) => {
     if (!currentArtigiano) return;
@@ -1431,6 +1647,7 @@ export default function App() {
         }}
         onOpenFatturaEmessa={() => setIsFatturaEmessaModalOpen(true)}
         onOpenXmlImport={() => setIsXmlModalOpen(true)}
+        onOpenExcelImport={() => setIsExcelModalOpen(true)}
         onResetData={() => {
           const reloaded = resetAllDataToDefaults();
           setArtigiani(reloaded);
@@ -1461,6 +1678,7 @@ export default function App() {
               setSelectedArtigianoId(artId);
               setIsXmlModalOpen(true);
             }}
+            onOpenExcelImport={() => setIsExcelModalOpen(true)}
           />
         )}
 
@@ -1481,6 +1699,7 @@ export default function App() {
             onUpdateCantiere={handleUpdateCantiere}
             onDeleteCantiere={handleDeleteCantiere}
             onOpenXmlImport={() => setIsXmlModalOpen(true)}
+            onOpenExcelImport={() => setIsExcelModalOpen(true)}
             onOpenFatturaEmessa={() => setIsFatturaEmessaModalOpen(true)}
             onNavigateToSospesi={() => setNavLevel('scheda_sospesi')}
             onUpdateQuadratura={handleUpdateQuadratura}
@@ -1513,6 +1732,7 @@ export default function App() {
             onMoveToOtherCantiere={(sourceId, targetId, mov) => handleMoveMovementToOtherCantiere(sourceId, targetId, mov)}
             onDeleteCantiere={handleDeleteCantiere}
             onOpenXmlImport={() => setIsXmlModalOpen(true)}
+            onOpenExcelImport={() => setIsExcelModalOpen(true)}
             onOpenFatturaEmessa={() => setIsFatturaEmessaModalOpen(true)}
             onPrint={() => setIsPrintCantiereView(true)}
           />
@@ -1533,6 +1753,7 @@ export default function App() {
             onDeleteMultipleSospesi={handleDeleteMultipleSospesi}
             onClearAllSospesi={handleClearAllSospesi}
             onAddManualSospeso={handleAddManualSospeso}
+            onOpenExcelImport={() => setIsExcelModalOpen(true)}
             onPrintReport={() => setIsPrintSospesiView(true)}
           />
         )}
@@ -1565,6 +1786,21 @@ export default function App() {
             setCantiereToEdit(null);
             setIsCantiereModalOpen(true);
           }}
+        />
+      )}
+
+      {/* Modal 2B: Import Vecchi Cantieri e Dati Storici da Excel (.xls / .xlsx) */}
+      {isExcelModalOpen && (
+        <ExcelImportModal
+          isOpen={isExcelModalOpen}
+          onClose={() => setIsExcelModalOpen(false)}
+          artigiani={artigiani}
+          currentArtigianoId={selectedArtigianoId}
+          currentCantiereId={selectedCantiereId}
+          onCommitSingolaScheda={handleCommitSingolaSchedaExcel}
+          onCommitSospesi={handleCommitSospesiExcel}
+          onCommitProspettoGenerale={handleCommitProspettoGeneraleExcel}
+          isSupabaseConnected={isSupabaseConnected}
         />
       )}
 

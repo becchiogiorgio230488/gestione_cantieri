@@ -59,6 +59,7 @@ interface SchedaCantiereViewProps {
   onMoveToOtherCantiere?: (sourceCantiereId: string, targetCantiereId: string, movement: Movement) => void;
   onDeleteCantiere?: (cantiereId: string) => void;
   onOpenXmlImport: () => void;
+  onOpenExcelImport?: () => void;
   onOpenFatturaEmessa: () => void;
   onPrint: () => void;
 }
@@ -78,6 +79,7 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
   onMoveToOtherCantiere,
   onDeleteCantiere,
   onOpenXmlImport,
+  onOpenExcelImport,
   onOpenFatturaEmessa,
   onPrint,
 }) => {
@@ -457,6 +459,17 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
             <FileUp className="h-3.5 w-3.5" />
             <span>Importa XML</span>
           </button>
+
+          {onOpenExcelImport && (
+            <button
+              onClick={onOpenExcelImport}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer shadow-sm"
+              title="Importa movimenti storici da file Excel (.xls / .xlsx)"
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5 text-teal-200" />
+              <span>Importa da Excel</span>
+            </button>
+          )}
 
           <button
             onClick={() => exportSingleCantiereExcel(cantiere, artigianoName)}

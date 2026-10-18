@@ -31,6 +31,7 @@ interface ArtigianiHomeViewProps {
   onEditArtigiano: (artigiano: Artigiano) => void;
   onDeleteArtigiano: (artigianoId: string) => void;
   onOpenXmlImportForArtigiano?: (artigianoId: string) => void;
+  onOpenExcelImport?: () => void;
 }
 
 export const ArtigianiHomeView: React.FC<ArtigianiHomeViewProps> = ({
@@ -40,6 +41,7 @@ export const ArtigianiHomeView: React.FC<ArtigianiHomeViewProps> = ({
   onEditArtigiano,
   onDeleteArtigiano,
   onOpenXmlImportForArtigiano,
+  onOpenExcelImport,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -102,7 +104,19 @@ export const ArtigianiHomeView: React.FC<ArtigianiHomeViewProps> = ({
             </h1>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {onOpenExcelImport && (
+              <button
+                type="button"
+                onClick={onOpenExcelImport}
+                className="inline-flex items-center gap-2 px-3.5 py-2 bg-emerald-700/80 hover:bg-emerald-600 text-white rounded-xl text-xs sm:text-sm font-bold border border-emerald-500/40 transition-all shadow-md cursor-pointer"
+                title="Importa vecchi cantieri, saldi o schede da file Excel (.xls / .xlsx)"
+              >
+                <FileSpreadsheet className="h-4 w-4 text-emerald-300" />
+                <span>Importa da Excel</span>
+              </button>
+            )}
+
             <button
               onClick={onOpenNewArtigiano}
               className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs sm:text-sm font-extrabold transition-all shadow-lg shadow-amber-500/20 cursor-pointer"

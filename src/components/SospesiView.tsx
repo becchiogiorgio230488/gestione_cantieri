@@ -44,6 +44,7 @@ interface SospesiViewProps {
   onDeleteMultipleSospesi?: (ids: string[]) => void;
   onClearAllSospesi?: () => void;
   onAddManualSospeso: (item: Omit<SospesoItem, 'id' | 'createdAt'>) => void;
+  onOpenExcelImport?: () => void;
   onPrintReport: () => void;
 }
 
@@ -60,6 +61,7 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
   onDeleteMultipleSospesi,
   onClearAllSospesi,
   onAddManualSospeso,
+  onOpenExcelImport,
   onPrintReport,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -344,6 +346,18 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                 <FileSpreadsheet className="h-4 w-4" />
                 <span>Excel (.xlsx)</span>
               </button>
+
+              {onOpenExcelImport && (
+                <button
+                  type="button"
+                  onClick={onOpenExcelImport}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer"
+                  title="Importa vecchie schede sospesi da file Excel (.xls / .xlsx)"
+                >
+                  <FileSpreadsheet className="h-4 w-4 text-teal-200" />
+                  <span>Importa da Excel</span>
+                </button>
+              )}
 
               <button
                 onClick={onPrintReport}

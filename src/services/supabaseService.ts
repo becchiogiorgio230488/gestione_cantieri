@@ -352,6 +352,73 @@ export async function upsertMovementToSupabase(cantiereId: string, movement: Mov
 }
 
 /**
+ * Bulk upserts multiple movements to Supabase
+ */
+export async function bulkUpsertMovementsToSupabase(cantiereId: string, movements: Movement[]): Promise<void> {
+  if (!supabase || !isSupabaseConfigured() || movements.length === 0) return;
+
+  const rows = movements.map((m) => ({
+    id: m.id,
+    cantiere_id: cantiereId,
+    date: m.date,
+    doc_number: m.docNumber,
+    type_and_subject: m.typeAndSubject,
+    protocol: m.protocol || null,
+    purchases: m.purchases || 0,
+    issued: m.issued || 0,
+    notes: m.notes || null,
+    source: m.source || 'manuale',
+    xml_ref: m.xmlRef || null,
+    attachment_pdf: m.attachmentPdf || null,
+  }));
+
+  const { error } = await supabase.from('movements').upsert(rows);
+  if (error) {
+    console.error('Error bulk upserting movements in Supabase:', error);
+    // fallback row by row if batch failed
+    for (const mov of movements) {
+      await upsertMovementToSupabase(cantiereId, mov);
+    }
+  }
+}
+
+/**
+ * Bulk upserts multiple sospesi to Supabase
+ */
+export async function bulkUpsertSospesiToSupabase(artigianoId: string, items: SospesoItem[]): Promise<void> {
+  if (!supabase || !isSupabaseConfigured() || items.length === 0) return;
+
+  const rows = items.map((item) => ({
+    id: item.id,
+    artigiano_id: artigianoId,
+    date: item.date,
+    doc_number: item.docNumber,
+    supplier: (item.supplier || '').toUpperCase(),
+    description: item.description,
+    amount: item.amount || 0,
+    protocol: item.protocol || null,
+    client: item.client || null,
+    ddt_number: item.ddtNumber || null,
+    ddt_date: item.ddtDate || null,
+    status: item.status || 'in_attesa_cliente',
+    customer_note: item.customerNote || null,
+    internal_note: item.internalNote || null,
+    suggested_cantiere_id: item.suggestedCantiereId || null,
+    source_file_name: item.sourceFileName || null,
+    attachment_pdf: item.attachmentPdf || null,
+    created_at: item.createdAt || new Date().toISOString(),
+  }));
+
+  const { error } = await supabase.from('sospesi').upsert(rows);
+  if (error) {
+    console.warn('Batch upsert sospesi failed, falling back to sequential:', error);
+    for (const item of items) {
+      await upsertSospesoToSupabase(artigianoId, item);
+    }
+  }
+}
+
+/**
  * Deletes a movement from Supabase
  */
 export async function deleteMovementFromSupabase(movementId: string): Promise<void> {
