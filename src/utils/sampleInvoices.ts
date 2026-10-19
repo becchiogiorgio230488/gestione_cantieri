@@ -480,6 +480,178 @@ export const SAMPLE_INVOICES: SampleInvoice[] = [
     </DatiBeniServizi>
   </FatturaElettronicaBody>
 </p:FatturaElettronica>`
+  },
+  {
+    name: 'Fattura Edilizia: DDT Multipli, Reso Materiale (-40€) e Oneri Spese Ri.Ba. (Quadratura)',
+    category: 'Edile / Test Motore Intelligente',
+    supplier: 'EDILIZIA & MATERIALI MODERNA S.R.L.',
+    description: 'Dimostrazione completa: DDT 112 con reso negativo (-40€) e nota di cantiere intermedia, DDT 128 cappotto termico, spese incasso Ri.Ba. e CONAI orfani con quadratura perfetta a 1.616,00 €.',
+    total: 1971.52,
+    xml: `<?xml version="1.0" encoding="UTF-8"?>
+<p:FatturaElettronica versione="FPR12" xmlns:p="http://ivaservizi.agenziaentrate.gov.it/docs/xsd/fatture/v1.2">
+  <FatturaElettronicaHeader>
+    <DatiTrasmissione>
+      <IdTrasmittente>
+        <IdPaese>IT</IdPaese>
+        <IdCodice>01234567890</IdCodice>
+      </IdTrasmittente>
+      <ProgressivoInvio>EDIL202699</ProgressivoInvio>
+      <FormatoTrasmissione>FPR12</FormatoTrasmissione>
+      <CodiceDestinatario>0000000</CodiceDestinatario>
+    </DatiTrasmissione>
+    <CedentePrestatore>
+      <DatiAnagrafici>
+        <IdFiscaleIVA>
+          <IdPaese>IT</IdPaese>
+          <IdCodice>01234567890</IdCodice>
+        </IdFiscaleIVA>
+        <CodiceFiscale>01234567890</CodiceFiscale>
+        <Anagrafica>
+          <Denominazione>EDILIZIA &amp; MATERIALI MODERNA S.R.L.</Denominazione>
+        </Anagrafica>
+        <RegimeFiscale>RF01</RegimeFiscale>
+      </DatiAnagrafici>
+      <Sede>
+        <Indirizzo>Via delle Cave 15</Indirizzo>
+        <CAP>20900</CAP>
+        <Comune>Monza</Comune>
+        <Provincia>MB</Provincia>
+        <Nazione>IT</Nazione>
+      </Sede>
+    </CedentePrestatore>
+    <CessionarioCommittente>
+      <DatiAnagrafici>
+        <CodiceFiscale>SRNMSM80A01F205W</CodiceFiscale>
+        <Anagrafica>
+          <Denominazione>SIRNA MASSIMO IMPIANTI &amp; COSTRUZIONI</Denominazione>
+        </Anagrafica>
+      </DatiAnagrafici>
+      <Sede>
+        <Indirizzo>Via Milano 40</Indirizzo>
+        <CAP>20100</CAP>
+        <Comune>Milano</Comune>
+        <Provincia>MI</Provincia>
+        <Nazione>IT</Nazione>
+      </Sede>
+    </CessionarioCommittente>
+  </FatturaElettronicaHeader>
+  <FatturaElettronicaBody>
+    <DatiGenerali>
+      <DatiGeneraliDocumento>
+        <TipoDocumento>TD01</TipoDocumento>
+        <Divisa>EUR</Divisa>
+        <Data>2026-03-10</Data>
+        <Numero>FT-2026/01140</Numero>
+        <ImportoTotaleDocumento>1971.52</ImportoTotaleDocumento>
+        <Causale>Fornitura materiali edili, isolamento e accessori cantieri</Causale>
+      </DatiGeneraliDocumento>
+      <!-- DDT 1: con puntatori 1, 2, 4 e linea intermedia 3 descrittiva/cantiere -->
+      <DatiDDT>
+        <NumeroDDT>DDT-2026/112</NumeroDDT>
+        <DataDDT>2026-03-02</DataDDT>
+        <RiferimentoNumeroLinea>1</RiferimentoNumeroLinea>
+        <RiferimentoNumeroLinea>2</RiferimentoNumeroLinea>
+        <RiferimentoNumeroLinea>4</RiferimentoNumeroLinea>
+      </DatiDDT>
+      <!-- DDT 2: isolanti per secondo cantiere -->
+      <DatiDDT>
+        <NumeroDDT>DDT-2026/128</NumeroDDT>
+        <DataDDT>2026-03-08</DataDDT>
+        <RiferimentoNumeroLinea>5</RiferimentoNumeroLinea>
+        <RiferimentoNumeroLinea>6</RiferimentoNumeroLinea>
+      </DatiDDT>
+    </DatiGenerali>
+    <DatiBeniServizi>
+      <!-- Blocco DDT 112 -->
+      <DettaglioLinee>
+        <NumeroLinea>1</NumeroLinea>
+        <Descrizione>Malta bastarda premiscelata per intonaco e muratura sacco 25kg</Descrizione>
+        <Quantita>50.00</Quantita>
+        <UnitaMisura>SC</UnitaMisura>
+        <PrezzoUnitario>4.50</PrezzoUnitario>
+        <PrezzoTotale>225.00</PrezzoTotale>
+        <AliquotaIVA>22.00</AliquotaIVA>
+      </DettaglioLinee>
+      <DettaglioLinee>
+        <NumeroLinea>2</NumeroLinea>
+        <Descrizione>Blocchi forati in laterizio 8x20x25 per tramezzature interne</Descrizione>
+        <Quantita>400.00</Quantita>
+        <UnitaMisura>PZ</UnitaMisura>
+        <PrezzoUnitario>0.85</PrezzoUnitario>
+        <PrezzoTotale>340.00</PrezzoTotale>
+        <AliquotaIVA>22.00</AliquotaIVA>
+      </DettaglioLinee>
+      <!-- Riga intermedia a valore 0 con indicazione cantiere -->
+      <DettaglioLinee>
+        <NumeroLinea>3</NumeroLinea>
+        <Descrizione>DESTINAZIONE: CANTIERE RESIDENZA IL PARCO VIA ROMA 12 MONZA</Descrizione>
+        <Quantita>1.00</Quantita>
+        <PrezzoUnitario>0.00</PrezzoUnitario>
+        <PrezzoTotale>0.00</PrezzoTotale>
+        <AliquotaIVA>22.00</AliquotaIVA>
+      </DettaglioLinee>
+      <!-- Riga di reso / storno con segno negativo algebrico -->
+      <DettaglioLinee>
+        <NumeroLinea>4</NumeroLinea>
+        <Descrizione>Reso e storno bancali epal a rendere vuoti non conformi</Descrizione>
+        <Quantita>-5.00</Quantita>
+        <UnitaMisura>PZ</UnitaMisura>
+        <PrezzoUnitario>8.00</PrezzoUnitario>
+        <PrezzoTotale>-40.00</PrezzoTotale>
+        <AliquotaIVA>22.00</AliquotaIVA>
+      </DettaglioLinee>
+
+      <!-- Blocco DDT 128 -->
+      <DettaglioLinee>
+        <NumeroLinea>5</NumeroLinea>
+        <Descrizione>Pannelli isolanti EPS 100mm grafite per isolamento a cappotto termico</Descrizione>
+        <Quantita>80.00</Quantita>
+        <UnitaMisura>MQ</UnitaMisura>
+        <PrezzoUnitario>12.00</PrezzoUnitario>
+        <PrezzoTotale>960.00</PrezzoTotale>
+        <AliquotaIVA>22.00</AliquotaIVA>
+      </DettaglioLinee>
+      <DettaglioLinee>
+        <NumeroLinea>6</NumeroLinea>
+        <Descrizione>Tasselli ad espansione con chiodo in acciaio per isolante a battuta 160mm</Descrizione>
+        <Quantita>500.00</Quantita>
+        <UnitaMisura>PZ</UnitaMisura>
+        <PrezzoUnitario>0.25</PrezzoUnitario>
+        <PrezzoTotale>125.00</PrezzoTotale>
+        <AliquotaIVA>22.00</AliquotaIVA>
+      </DettaglioLinee>
+
+      <!-- Oneri accessori orfani slegati dai DDT -->
+      <DettaglioLinee>
+        <NumeroLinea>7</NumeroLinea>
+        <Descrizione>Spese bancarie di incasso e gestione ricevuta bancaria (Ri.Ba.)</Descrizione>
+        <Quantita>1.00</Quantita>
+        <PrezzoUnitario>4.50</PrezzoUnitario>
+        <PrezzoTotale>4.50</PrezzoTotale>
+        <AliquotaIVA>22.00</AliquotaIVA>
+      </DettaglioLinee>
+      <DettaglioLinee>
+        <NumeroLinea>8</NumeroLinea>
+        <Descrizione>Contributo ambientale CONAI imballaggi primari in plastica e legno</Descrizione>
+        <Quantita>1.00</Quantita>
+        <PrezzoUnitario>1.50</PrezzoUnitario>
+        <PrezzoTotale>1.50</PrezzoTotale>
+        <AliquotaIVA>22.00</AliquotaIVA>
+      </DettaglioLinee>
+    </DatiBeniServizi>
+
+    <!-- DatiRiepilogo per quadratura contabile al centesimo -->
+    <DatiBeniServiziRiepilogo>
+      <!-- Note: in SDI standard is DatiRiepilogo inside DatiBeniServizi or at root -->
+    </DatiBeniServiziRiepilogo>
+    <DatiRiepilogo>
+      <AliquotaIVA>22.00</AliquotaIVA>
+      <ImponibileImporto>1616.00</ImponibileImporto>
+      <Imposta>355.52</Imposta>
+      <EsigibilitaIVA>I</EsigibilitaIVA>
+    </DatiRiepilogo>
+  </FatturaElettronicaBody>
+</p:FatturaElettronica>`
   }
 ];
 

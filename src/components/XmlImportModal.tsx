@@ -635,7 +635,104 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
     });
   };
 
-  // Live calculation of totals: Cantieri vs Sospesi vs Esclusi (Non Considerare) vs Da Selezionare
+  // Mode 2 (by_ddt): Ripartizione proporzionale oneri accessori orfani (spese incasso, CONAI, spese amministrative)
+  const [isOrphanExpensesExpanded, setIsOrphanExpensesExpanded] = useState<boolean>(true);
+
+  const handleProrateOrphanExpenses = () => {
+    if (!parsedInvoice || parsedInvoice.orphanExpenses.length === 0) return;
+    const cantiereTotals = new Map<string, number>();
+    let totalDdtActiveAssigned = 0;
+
+    parsedInvoice.ddtList.forEach((ddt) => {
+      const alloc = ddtAllocations[ddt.numeroDDT];
+      if (!alloc || alloc.targetCantiereId === '__ignore__' || alloc.targetCantiereId === '__sospeso__' || !alloc.targetCantiereId) {
+        return;
+      }
+      const connected = parsedInvoice.righe.filter((r) => ddt.riferimentoLinee.includes(r.numeroLinea));
+      const active = connected.filter((r) => !excludedLines[r.numeroLinea]);
+      const tot = connected.length > 0 ? active.reduce((s, r) => s + r.prezzoTotale, 0) : (ddt.totaleDDT || 0);
+      if (tot > 0) {
+        cantiereTotals.set(alloc.targetCantiereId, (cantiereTotals.get(alloc.targetCantiereId) || 0) + tot);
+        totalDdtActiveAssigned += tot;
+      }
+    });
+
+    if (cantiereTotals.size === 0 || totalDdtActiveAssigned <= 0) {
+      setErrorMessage(
+        'Assegna prima almeno un DDT a un cantiere valido per poter calcolare la ripartizione proporzionale delle spese accessorie.'
+      );
+      return;
+    }
+
+    if (cantiereTotals.size === 1) {
+      const singleCantiereId = Array.from(cantiereTotals.keys())[0];
+      setLineAllocations((prev) => {
+        const next = { ...prev };
+        parsedInvoice.orphanExpenses.forEach((exp) => {
+          next[exp.numeroLinea] = {
+            targetCantiereId: singleCantiereId,
+            isSplit: false,
+            splits: [{ cantiereId: singleCantiereId, percentage: 100, amount: exp.prezzoTotale }],
+          };
+        });
+        return next;
+      });
+      setAiSuccessMessage(
+        `Oneri accessori (€ ${parsedInvoice.totaleOneriAccessori.toFixed(2)}) imputati interamente all'unico cantiere dei DDT assegnati.`
+      );
+      setErrorMessage(null);
+      return;
+    }
+
+    const cantiereList = Array.from(cantiereTotals.entries());
+    setLineAllocations((prev) => {
+      const next = { ...prev };
+      parsedInvoice.orphanExpenses.forEach((exp) => {
+        let allocatedAmountSoFar = 0;
+        const splits = cantiereList.map(([cId, tot], idx) => {
+          const isLast = idx === cantiereList.length - 1;
+          const percentage = Math.round((tot / totalDdtActiveAssigned) * 1000) / 10;
+          let amount = Math.round(((exp.prezzoTotale * tot) / totalDdtActiveAssigned) * 100) / 100;
+          if (isLast) {
+            amount = Math.round((exp.prezzoTotale - allocatedAmountSoFar) * 100) / 100;
+          } else {
+            allocatedAmountSoFar += amount;
+          }
+          return { cantiereId: cId, percentage, amount };
+        });
+
+        next[exp.numeroLinea] = {
+          targetCantiereId: cantiereList[0][0],
+          isSplit: true,
+          splits,
+        };
+      });
+      return next;
+    });
+
+    setAiSuccessMessage(
+      `Oneri accessori (€ ${parsedInvoice.totaleOneriAccessori.toFixed(2)}) ripartiti proporzionalmente sui ${cantiereTotals.size} cantieri assegnati ai DDT.`
+    );
+    setErrorMessage(null);
+  };
+
+  const handleSetAllOrphanExpenses = (targetCantiereId: string) => {
+    if (!parsedInvoice || parsedInvoice.orphanExpenses.length === 0) return;
+    setLineAllocations((prev) => {
+      const next = { ...prev };
+      parsedInvoice.orphanExpenses.forEach((exp) => {
+        next[exp.numeroLinea] = {
+          targetCantiereId,
+          isSplit: false,
+          splits: [{ cantiereId: targetCantiereId, percentage: 100, amount: exp.prezzoTotale }],
+        };
+      });
+      return next;
+    });
+    if (targetCantiereId) setErrorMessage(null);
+  };
+
+  // Live calculation of totals: Cantieri vs Sospesi vs Esclusi (Non Considerare) vs Da Selezionare con conservazione del segno algebrico
   const computedStats = React.useMemo(() => {
     if (!parsedInvoice) {
       return {
@@ -648,6 +745,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         total: 0,
         imponibileTotal: 0,
         isNotaDiCredito: false,
+        differenzaQuadratura: 0,
+        isQuadraturaPerfetta: true,
       };
     }
     let cantieriSum = 0;
@@ -669,29 +768,31 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         unassignedCount += 1;
       }
     } else if (allocationMode === 'by_ddt' && parsedInvoice.ddtList.length > 0) {
+      // 1. DDT
       parsedInvoice.ddtList.forEach((ddt) => {
         const alloc = ddtAllocations[ddt.numeroDDT];
-        if (!alloc) {
-          unassignedSum += Math.abs(ddt.totaleDDT || 0);
-          unassignedCount++;
-          return;
-        }
-
         const connectedLines = parsedInvoice.righe.filter((r) =>
           ddt.riferimentoLinee.includes(r.numeroLinea)
         );
         const activeLines = connectedLines.filter((r) => !excludedLines[r.numeroLinea]);
         const excludedLinesInDdt = connectedLines.filter((r) => excludedLines[r.numeroLinea]);
 
+        // Calcolo rigorosamente algebrico (conserva i segni negativi per resi / storni)
         const ddtActiveTotal = connectedLines.length > 0
-          ? Math.round(activeLines.reduce((sum, r) => sum + Math.abs(r.prezzoTotale), 0) * 100) / 100
-          : Math.abs(ddt.totaleDDT || 0);
+          ? Math.round(activeLines.reduce((sum, r) => sum + r.prezzoTotale, 0) * 100) / 100
+          : (ddt.totaleDDT || 0);
 
         const ddtExcludedAmount = connectedLines.length > 0
-          ? Math.round(excludedLinesInDdt.reduce((sum, r) => sum + Math.abs(r.prezzoTotale), 0) * 100) / 100
+          ? Math.round(excludedLinesInDdt.reduce((sum, r) => sum + r.prezzoTotale, 0) * 100) / 100
           : 0;
 
         ignoredSum += ddtExcludedAmount;
+
+        if (!alloc || !alloc.targetCantiereId) {
+          unassignedSum += ddtActiveTotal;
+          unassignedCount++;
+          return;
+        }
 
         if (alloc.targetCantiereId === '__ignore__') {
           ignoredSum += ddtActiveTotal;
@@ -714,17 +815,52 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         } else if (alloc.targetCantiereId && alloc.targetCantiereId.trim()) {
           cantieriSum += ddtActiveTotal;
         } else {
-          if (ddtActiveTotal > 0) {
-            unassignedSum += ddtActiveTotal;
-            unassignedCount++;
-          }
+          unassignedSum += ddtActiveTotal;
+          unassignedCount++;
         }
       });
+
+      // 2. Oneri accessori orfani (spese incasso, CONAI, spese amministrative slegate dai DDT)
+      if (parsedInvoice.orphanExpenses && parsedInvoice.orphanExpenses.length > 0) {
+        parsedInvoice.orphanExpenses.forEach((exp) => {
+          const alloc = lineAllocations[exp.numeroLinea];
+          const expAmount = exp.prezzoTotale;
+          if (!alloc || !alloc.targetCantiereId) {
+            unassignedSum += expAmount;
+            unassignedCount++;
+            return;
+          }
+          if (alloc.targetCantiereId === '__ignore__') {
+            ignoredSum += expAmount;
+          } else if (alloc.targetCantiereId === '__sospeso__') {
+            sospesiSum += expAmount;
+          } else if (alloc.isSplit && alloc.splits.length > 0) {
+            alloc.splits.forEach((sp) => {
+              if (sp.cantiereId === '__ignore__') {
+                ignoredSum += sp.amount;
+              } else if (sp.cantiereId === '__sospeso__') {
+                sospesiSum += sp.amount;
+              } else if (sp.cantiereId && sp.cantiereId.trim()) {
+                cantieriSum += sp.amount;
+              } else {
+                unassignedSum += sp.amount;
+                unassignedCount++;
+              }
+            });
+          } else if (alloc.targetCantiereId && alloc.targetCantiereId.trim()) {
+            cantieriSum += expAmount;
+          } else {
+            unassignedSum += expAmount;
+            unassignedCount++;
+          }
+        });
+      }
     } else {
+      // Modalità by_line: calcolo algebrico su ogni singola riga
       parsedInvoice.righe.forEach((line) => {
         const alloc = lineAllocations[line.numeroLinea];
-        const lineTot = Math.abs(line.prezzoTotale);
-        if (!alloc) {
+        const lineTot = line.prezzoTotale;
+        if (!alloc || !alloc.targetCantiereId) {
           unassignedSum += lineTot;
           unassignedCount++;
           return;
@@ -735,7 +871,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
           sospesiSum += lineTot;
         } else if (alloc.isSplit && alloc.splits.length > 0) {
           alloc.splits.forEach((sp) => {
-            const spAmount = Math.abs(sp.amount);
+            const spAmount = sp.amount;
             if (sp.cantiereId === '__ignore__') {
               ignoredSum += spAmount;
             } else if (sp.cantiereId === '__sospeso__') {
@@ -760,19 +896,38 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
     const roundedCantieri = Math.round(cantieriSum * sign * 100) / 100;
     const roundedSospesi = Math.round(sospesiSum * sign * 100) / 100;
     const roundedCantieriPlusSospesi = Math.round((roundedCantieri + roundedSospesi) * 100) / 100;
+    const roundedIgnored = Math.round(ignoredSum * 100) / 100;
+    const roundedUnassigned = Math.round(unassignedSum * sign * 100) / 100;
+
+    // Quadratura con l'imponibile del fornitore:
+    const totaleImponibileFornitore = Math.round(invoiceImponibile * sign * 100) / 100;
+    const totaleAssegnato = Math.round((roundedCantieri + roundedSospesi + roundedIgnored * sign) * 100) / 100;
+    const diffQuadratura = Math.round((totaleImponibileFornitore - totaleAssegnato) * 100) / 100;
+    const isQuadraturaPerfetta = unassignedCount === 0 && Math.abs(diffQuadratura) < 0.01;
 
     return {
       cantieri: roundedCantieri,
       sospesi: roundedSospesi,
       cantieriPlusSospesi: roundedCantieriPlusSospesi,
-      ignored: Math.round(ignoredSum * 100) / 100,
-      unassigned: Math.round(unassignedSum * sign * 100) / 100,
+      ignored: roundedIgnored,
+      unassigned: roundedUnassigned,
       unassignedCount,
       total: Math.round(Math.abs(parsedInvoice.datiDocumento.importoTotale) * sign * 100) / 100,
-      imponibileTotal: Math.round(invoiceImponibile * sign * 100) / 100,
+      imponibileTotal: totaleImponibileFornitore,
+      differenzaQuadratura: diffQuadratura,
+      isQuadraturaPerfetta,
       isNotaDiCredito,
     };
-  }, [parsedInvoice, allocationMode, wholeInvoiceCantiereId, ddtAllocations, lineAllocations, excludedLines, invoiceImponibile, isNotaDiCredito]);
+  }, [
+    parsedInvoice,
+    allocationMode,
+    wholeInvoiceCantiereId,
+    ddtAllocations,
+    lineAllocations,
+    excludedLines,
+    invoiceImponibile,
+    isNotaDiCredito,
+  ]);
 
   // Commit all allocations into movements and/or sospesi
   const handleConfirmAndCommit = (bypassDuplicateCheck = false) => {
@@ -814,10 +969,38 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         }
       });
 
-      if (unassignedDdtList.length > 0) {
+      // Verifica anche che tutti gli eventuali oneri accessori orfani siano valorizzati
+      const unassignedOrphans: string[] = [];
+      if (parsedInvoice.orphanExpenses && parsedInvoice.orphanExpenses.length > 0) {
+        parsedInvoice.orphanExpenses.forEach((exp) => {
+          const alloc = lineAllocations[exp.numeroLinea];
+          if (!alloc) {
+            unassignedOrphans.push(`Riga ${exp.numeroLinea} ("${exp.descrizione.slice(0, 20)}...")`);
+            return;
+          }
+          if (alloc.targetCantiereId === '__ignore__') return;
+          if (alloc.isSplit) {
+            const hasEmpty = alloc.splits.some((sp) => !sp.cantiereId || !sp.cantiereId.trim());
+            if (hasEmpty) {
+              unassignedOrphans.push(`Riga ${exp.numeroLinea} (quote non assegnate)`);
+            }
+          } else if (!alloc.targetCantiereId || !alloc.targetCantiereId.trim()) {
+            unassignedOrphans.push(`Riga ${exp.numeroLinea} ("${exp.descrizione.slice(0, 20)}...")`);
+          }
+        });
+      }
+
+      if (unassignedDdtList.length > 0 || unassignedOrphans.length > 0) {
         setShowValidationErrors(true);
+        const details: string[] = [];
+        if (unassignedDdtList.length > 0) {
+          details.push(`DDT da completare: ${unassignedDdtList.join(', ')}`);
+        }
+        if (unassignedOrphans.length > 0) {
+          details.push(`Oneri accessori da completare: ${unassignedOrphans.join(', ')}`);
+        }
         setErrorMessage(
-          `Attenzione: ci sono ${unassignedDdtList.length} DDT con casella di destinazione non valorizzata! Seleziona per ciascuno un Cantiere, i Sospesi, oppure 'Da Non Considerare'. DDT da completare: ${unassignedDdtList.join(', ')}`
+          `Attenzione: ci sono elementi con casella di destinazione non valorizzata! Seleziona obbligatoriamente un Cantiere, i Sospesi, oppure 'Da Non Considerare'. ${details.join(' | ')}`
         );
         return;
       }
@@ -928,16 +1111,18 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         });
       }
     } else if (allocationMode === 'by_ddt' && parsedInvoice.ddtList.length > 0) {
-      // Group DDTs assigned to the same cantiere so they become a single unified movement
+      // Group DDTs and orphan expenses assigned to the same cantiere so they become a single unified movement
       const cantiereGroups = new Map<
         string,
         {
           cantiereId: string;
           totalPurchases: number;
           ddtItems: Array<{ numeroDDT: string; dataDDT?: string; amount: number; percentage?: number }>;
+          orphanItems: Array<{ description: string; amount: number; percentage?: number }>;
         }
       >();
 
+      // A. Raggruppa i blocchi merci dei DDT
       parsedInvoice.ddtList.forEach((ddt) => {
         const alloc = ddtAllocations[ddt.numeroDDT];
         if (!alloc) return;
@@ -953,10 +1138,10 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         const activeLines = connectedLines.filter((r) => !excludedLines[r.numeroLinea]);
 
         const ddtActiveTotal = connectedLines.length > 0
-          ? Math.round(activeLines.reduce((sum, r) => sum + Math.abs(r.prezzoTotale), 0) * 100) / 100
-          : Math.abs(ddt.totaleDDT || 0);
+          ? Math.round(activeLines.reduce((sum, r) => sum + r.prezzoTotale, 0) * 100) / 100
+          : (ddt.totaleDDT || 0);
 
-        if (ddtActiveTotal <= 0) {
+        if (Math.abs(ddtActiveTotal) <= 0.0001) {
           // All lines excluded by user for this DDT
           return;
         }
@@ -970,7 +1155,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             docNumber: invoiceNum,
             supplier: supplierName,
             description: `${isNotaDiCredito ? '[NOTA DI CREDITO] ' : ''}${customDdtName}: ${descSummary}`,
-            amount: sign * Math.abs(ddtActiveTotal),
+            amount: sign * ddtActiveTotal,
             ddtNumber: customDdtName,
             ddtDate: ddt.dataDDT,
             protocol: manualProt || customDdtName,
@@ -985,7 +1170,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
           alloc.splits.forEach((sp) => {
             if (sp.cantiereId === '__ignore__') return;
             const splitAmount = Math.round(((ddtActiveTotal * sp.percentage) / 100) * 100) / 100;
-            if (splitAmount <= 0) return;
+            if (Math.abs(splitAmount) <= 0.0001) return;
 
             if (sp.cantiereId === '__sospeso__') {
               sospesiCommitList.push({
@@ -993,7 +1178,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                 docNumber: invoiceNum,
                 supplier: supplierName,
                 description: `${isNotaDiCredito ? '[NOTA DI CREDITO] ' : ''}${customDdtName} (quota ${sp.percentage}%): ${descSummary}`,
-                amount: sign * Math.abs(splitAmount),
+                amount: sign * splitAmount,
                 ddtNumber: customDdtName,
                 ddtDate: ddt.dataDDT,
                 protocol: manualProt || customDdtName,
@@ -1010,6 +1195,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                   cantiereId: sp.cantiereId,
                   totalPurchases: 0,
                   ddtItems: [],
+                  orphanItems: [],
                 });
               }
               const group = cantiereGroups.get(sp.cantiereId)!;
@@ -1029,6 +1215,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
               cantiereId: cId,
               totalPurchases: 0,
               ddtItems: [],
+              orphanItems: [],
             });
           }
           const group = cantiereGroups.get(cId)!;
@@ -1041,11 +1228,86 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
         }
       });
 
-      // Now create a single movement row per cantiere containing the unified sum of all DDTs
+      // B. Raggruppa e assegna gli oneri accessori orfani
+      if (parsedInvoice.orphanExpenses && parsedInvoice.orphanExpenses.length > 0) {
+        parsedInvoice.orphanExpenses.forEach((exp) => {
+          const alloc = lineAllocations[exp.numeroLinea];
+          if (!alloc || alloc.targetCantiereId === '__ignore__') return;
+          const expAmount = exp.prezzoTotale;
+          if (Math.abs(expAmount) <= 0.0001) return;
+
+          if (alloc.targetCantiereId === '__sospeso__') {
+            sospesiCommitList.push({
+              date: invoiceDate,
+              docNumber: invoiceNum,
+              supplier: supplierName,
+              description: `${isNotaDiCredito ? '[NOTA DI CREDITO] ' : ''}[ONERI ACCESSORI] ${exp.descrizione}`,
+              amount: sign * expAmount,
+              protocol: manualProt || `SPESE-${invoiceNum}`,
+              status: 'in_attesa_cliente',
+              customerNote: 'Spese accessorie / oneri slegati da DDT da chiarire col cliente.',
+              sourceFileName: parsedInvoice.fileName,
+              attachmentPdf: attachedPdf || undefined,
+            });
+          } else if (alloc.isSplit && alloc.splits.length > 0) {
+            alloc.splits.forEach((sp) => {
+              if (sp.cantiereId === '__ignore__') return;
+              if (sp.cantiereId === '__sospeso__') {
+                sospesiCommitList.push({
+                  date: invoiceDate,
+                  docNumber: invoiceNum,
+                  supplier: supplierName,
+                  description: `${isNotaDiCredito ? '[NOTA DI CREDITO] ' : ''}[ONERI ACCESSORI ${sp.percentage}%] ${exp.descrizione}`,
+                  amount: sign * sp.amount,
+                  protocol: manualProt || `SPESE-${invoiceNum}`,
+                  status: 'in_attesa_cliente',
+                  customerNote: `Spese accessorie quota ${sp.percentage}% in sospeso.`,
+                  sourceFileName: parsedInvoice.fileName,
+                  attachmentPdf: attachedPdf || undefined,
+                });
+              } else if (sp.cantiereId) {
+                if (!cantiereGroups.has(sp.cantiereId)) {
+                  cantiereGroups.set(sp.cantiereId, {
+                    cantiereId: sp.cantiereId,
+                    totalPurchases: 0,
+                    ddtItems: [],
+                    orphanItems: [],
+                  });
+                }
+                const group = cantiereGroups.get(sp.cantiereId)!;
+                group.totalPurchases += sp.amount;
+                group.orphanItems.push({
+                  description: exp.descrizione,
+                  amount: sp.amount,
+                  percentage: sp.percentage,
+                });
+              }
+            });
+          } else if (alloc.targetCantiereId) {
+            const cId = alloc.targetCantiereId;
+            if (!cantiereGroups.has(cId)) {
+              cantiereGroups.set(cId, {
+                cantiereId: cId,
+                totalPurchases: 0,
+                ddtItems: [],
+                orphanItems: [],
+              });
+            }
+            const group = cantiereGroups.get(cId)!;
+            group.totalPurchases += expAmount;
+            group.orphanItems.push({
+              description: exp.descrizione,
+              amount: expAmount,
+            });
+          }
+        });
+      }
+
+      // Now create a single movement row per cantiere containing the unified sum of all DDTs and assigned orphan expenses
       let groupIdx = 0;
       cantiereGroups.forEach((group, cantiereId) => {
         const roundedTotal = Math.round(group.totalPurchases * 100) / 100;
-        if (roundedTotal <= 0) return;
+        if (Math.abs(roundedTotal) <= 0.0001) return;
 
         // Format each DDT label strictly according to requirement: "DDT N. <numero> DEL <data in DD/MM/YYYY>"
         const ddtListLabels = group.ddtItems.map((d) => {
@@ -1061,7 +1323,10 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
 
         const dates = group.ddtItems.map((d) => d.dataDDT).filter(Boolean) as string[];
         const movementDate = dates.length > 0 ? dates.sort().reverse()[0] : invoiceDate;
-        const signedPurchases = sign * Math.abs(roundedTotal);
+        const signedPurchases = isNotaDiCredito ? -Math.abs(roundedTotal) : roundedTotal;
+
+        const orphanTotal = group.orphanItems.reduce((acc, o) => acc + o.amount, 0);
+        const orphanNote = orphanTotal !== 0 ? ` (incl. spese/oneri accessori: € ${orphanTotal.toFixed(2)})` : '';
 
         commitList.push({
           cantiereId,
@@ -1075,7 +1340,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             issued: 0,
             source: 'xml',
             attachmentPdf: attachedPdf || undefined,
-            notes: `${isNotaDiCredito ? 'NOTA DI CREDITO - ' : ''}Fattura ${invoiceNum} - Totale unico di ${group.ddtItems.length} DDT (${ddtNamesOnly})`,
+            notes: `${isNotaDiCredito ? 'NOTA DI CREDITO - ' : ''}Fattura ${invoiceNum} - Totale di ${group.ddtItems.length} DDT (${ddtNamesOnly || 'Oneri'})${orphanNote}`,
             xmlRef: {
               supplier: supplierName,
               invoiceNum: invoiceNum,
@@ -1620,6 +1885,118 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                     Cambia XML
                   </button>
                 </div>
+              </div>
+
+              {/* Quadro di Quadratura Contabile & Controllo Fiscale */}
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-3 shadow-md">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                      Quadro di Quadratura Contabile & Fiscale
+                    </span>
+                    {parsedInvoice.quadratura && parsedInvoice.quadratura.isQuadraturaPerfetta && (
+                      <span className="text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded">
+                        XML Verificato
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Controllo quadratura al centesimo: <strong className="text-white font-mono">{formatCurrency(computedStats.imponibileTotal)}</strong> (Imponibile Fornitore)
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {/* Card 1: Imponibile Fattura */}
+                  <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-0.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                      1. Imponibile Fattura
+                    </span>
+                    <span className="font-mono text-sm sm:text-base font-extrabold text-white">
+                      {formatCurrency(computedStats.imponibileTotal)}
+                    </span>
+                    <span className="text-[10px] text-slate-500 block truncate">
+                      {parsedInvoice.datiDocumento.riepilogoIVA && parsedInvoice.datiDocumento.riepilogoIVA.length > 1
+                        ? `${parsedInvoice.datiDocumento.riepilogoIVA.length} aliquote IVA`
+                        : 'Totale imponibile SDI'}
+                    </span>
+                  </div>
+
+                  {/* Card 2: Imputato a Cantieri */}
+                  <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-0.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 block">
+                      2. Imputato Cantieri
+                    </span>
+                    <span className="font-mono text-sm sm:text-base font-extrabold text-emerald-400">
+                      {formatCurrency(computedStats.cantieri)}
+                    </span>
+                    <span className="text-[10px] text-slate-500 block">
+                      Movimenti nei cantieri
+                    </span>
+                  </div>
+
+                  {/* Card 3: Scheda Sospesi */}
+                  <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-0.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 block">
+                      3. Scheda Sospesi
+                    </span>
+                    <span className="font-mono text-sm sm:text-base font-extrabold text-amber-400">
+                      {formatCurrency(computedStats.sospesi)}
+                    </span>
+                    <span className="text-[10px] text-slate-500 block">
+                      In attesa chiarimento
+                    </span>
+                  </div>
+
+                  {/* Card 4: Da Non Considerare */}
+                  <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-0.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                      4. Da Non Considerare
+                    </span>
+                    <span className="font-mono text-sm sm:text-base font-extrabold text-slate-300">
+                      {formatCurrency(computedStats.ignored)}
+                    </span>
+                    <span className="text-[10px] text-slate-500 block">
+                      Escluso dai costi cantiere
+                    </span>
+                  </div>
+                </div>
+
+                {/* Status Bar: Quadratura Perfetta vs Sbilancio */}
+                {computedStats.isQuadraturaPerfetta ? (
+                  <div className="p-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center justify-between gap-2 shadow-sm">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                      <span>QUADRATURA CONTABILE PERFETTA AL CENTESIMO (Differenza: € 0,00)</span>
+                    </div>
+                    <span className="font-mono text-[11px] text-emerald-200 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/40">
+                      100% Imputato
+                    </span>
+                  </div>
+                ) : (
+                  <div className="p-2.5 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs font-semibold flex items-center justify-between gap-2 shadow-sm">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+                      <span>
+                        {computedStats.unassignedCount > 0 ? (
+                          <>
+                            Da completare: <strong>{computedStats.unassignedCount} {computedStats.unassignedCount === 1 ? 'elemento' : 'elementi'}</strong> ancora da destinare (importo: <strong className="font-mono text-white">{formatCurrency(computedStats.unassigned)}</strong>)
+                          </>
+                        ) : (
+                          <>
+                            Sbilancio di Quadratura con Imponibile Fattura:{' '}
+                            <strong className="font-mono text-white">{formatCurrency(computedStats.differenzaQuadratura)}</strong>
+                          </>
+                        )}
+                      </span>
+                    </div>
+                    {computedStats.unassignedCount > 0 && (
+                      <span className="text-[10px] font-bold text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-500/40 shrink-0">
+                        {computedStats.unassignedCount} mancanti
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Duplicate invoice warning banner */}
@@ -2337,6 +2714,195 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                     })}
                   </div>
 
+                  {/* Sezione Oneri Accessori e Spese Generali Documento (non vincolati a DDT) */}
+                  {parsedInvoice.orphanExpenses && parsedInvoice.orphanExpenses.length > 0 && (
+                    <div className="mt-4 p-4 rounded-xl bg-slate-900 border border-amber-500/40 space-y-3.5 shadow-lg">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Tag className="h-4 w-4 text-amber-400" />
+                            <span className="text-xs font-bold text-white uppercase tracking-wider">
+                              Oneri Accessori e Spese Generali Fattura (Slegate dai DDT)
+                            </span>
+                            <span className="text-[10px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded">
+                              {parsedInvoice.orphanExpenses.length} {parsedInvoice.orphanExpenses.length === 1 ? 'voce' : 'voci'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-400">
+                            Spese d'incasso Ri.Ba., contributo CONAI, spese bancarie o oneri amministrativi che concorrono all'imponibile totale.
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <span className="text-[10px] text-slate-400 block uppercase font-semibold">Totale Oneri:</span>
+                            <span className="font-mono text-base font-bold text-amber-400">
+                              {formatCurrency(parsedInvoice.totaleOneriAccessori)}
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => setIsOrphanExpensesExpanded(!isOrphanExpensesExpanded)}
+                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold cursor-pointer"
+                            title="Espandi o comprimi l'elenco degli oneri accessori"
+                          >
+                            {isOrphanExpensesExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Quick actions for orphan expenses */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg bg-slate-950/80 border border-slate-800 text-xs">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[11px] font-bold text-slate-300">Assegnazione Rapida Spese:</span>
+                          <button
+                            type="button"
+                            onClick={handleProrateOrphanExpenses}
+                            className="px-2.5 py-1 rounded-md text-[11px] font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1 shadow-sm cursor-pointer transition-all"
+                            title="Ripartisce le spese accessorie tra i cantieri assegnati in proporzione all'importo dei rispettivi DDT"
+                          >
+                            <Sparkles className="h-3 w-3 text-amber-300" />
+                            <span>⚡ Ripartisci Proporzionalmente sui Cantieri dei DDT</span>
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSetAllOrphanExpenses('__sospeso__')}
+                            className="px-2 py-1 rounded text-[11px] font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-pointer"
+                          >
+                            Tutte a Sospesi
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSetAllOrphanExpenses('__ignore__')}
+                            className="px-2 py-1 rounded text-[11px] font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 cursor-pointer"
+                          >
+                            Non Considerare
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Table / List of orphan expenses */}
+                      {isOrphanExpensesExpanded && (
+                        <div className="space-y-2.5">
+                          {parsedInvoice.orphanExpenses.map((exp) => {
+                            const alloc = lineAllocations[exp.numeroLinea] || {
+                              targetCantiereId: '',
+                              isSplit: false,
+                              splits: [{ cantiereId: '', percentage: 100, amount: exp.prezzoTotale }],
+                            };
+
+                            return (
+                              <div
+                                key={exp.numeroLinea}
+                                className={`p-3 rounded-lg border transition-colors ${
+                                  alloc.targetCantiereId === '__ignore__'
+                                    ? 'bg-slate-950/60 border-rose-900/40 opacity-75'
+                                    : 'bg-slate-950 border-slate-800'
+                                }`}
+                              >
+                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-mono text-xs font-bold text-amber-400">R{exp.numeroLinea}</span>
+                                      <span className="text-xs font-semibold text-slate-200">{exp.descrizione}</span>
+                                      {exp.isReturnOrDiscount && (
+                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                          Storno / Accredito
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-3 shrink-0">
+                                    <span className="font-mono text-sm font-bold text-amber-300">
+                                      {formatCurrency(exp.prezzoTotale)}
+                                    </span>
+
+                                    <div className="w-56">
+                                      <CantiereSearchSelect
+                                        value={alloc.isSplit ? '__split__' : alloc.targetCantiereId}
+                                        hasError={showValidationErrors && !alloc.targetCantiereId && !alloc.isSplit}
+                                        onChange={(val) => {
+                                          if (val === '__split__') {
+                                            setLineAllocations((prev) => ({
+                                              ...prev,
+                                              [exp.numeroLinea]: {
+                                                ...prev[exp.numeroLinea],
+                                                isSplit: true,
+                                              },
+                                            }));
+                                            return;
+                                          }
+                                          setLineAllocations((prev) => ({
+                                            ...prev,
+                                            [exp.numeroLinea]: {
+                                              ...prev[exp.numeroLinea],
+                                              targetCantiereId: val,
+                                              isSplit: false,
+                                            },
+                                          }));
+                                        }}
+                                        cantieri={allCantieri}
+                                        onCreateNew={() => openCreateCantiereModal({ mode: 'line', key: exp.numeroLinea })}
+                                        showSospesiOption={true}
+                                        showIgnoreOption={true}
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Multi-split details if prorated or manually split */}
+                                {alloc.isSplit && alloc.splits && alloc.splits.length > 0 && (
+                                  <div className="mt-2.5 pt-2 border-t border-slate-800 text-xs">
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <span className="text-[11px] font-bold text-indigo-300 flex items-center gap-1">
+                                        <Split className="h-3 w-3" />
+                                        <span>Ripartizione proporzionale applicata ({alloc.splits.length} cantieri):</span>
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setLineAllocations((prev) => ({
+                                            ...prev,
+                                            [exp.numeroLinea]: {
+                                              ...prev[exp.numeroLinea],
+                                              isSplit: false,
+                                              targetCantiereId: '',
+                                            },
+                                          }));
+                                        }}
+                                        className="text-[10px] text-slate-400 hover:text-slate-200 underline cursor-pointer"
+                                      >
+                                        Rimuovi ripartizione
+                                      </button>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-1.5">
+                                      {alloc.splits.map((sp, sIdx) => {
+                                        const cName = allCantieri.find((c) => c.id === sp.cantiereId)?.name || sp.cantiereId;
+                                        return (
+                                          <div key={sIdx} className="p-1.5 rounded bg-slate-900 border border-slate-800 flex items-center justify-between text-[11px]">
+                                            <span className="font-medium text-slate-300 truncate max-w-[120px]">{cName}</span>
+                                            <span className="font-mono text-amber-400 font-bold">
+                                              {formatCurrency(sp.amount)} <span className="text-slate-500 font-normal">({sp.percentage}%)</span>
+                                            </span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Live Preview of Grouped Cantiere Rows */}
                   {(() => {
                     const previewMap = new Map<
@@ -2346,6 +2912,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                         ddtLabels: string[];
                         ddtNames: string[];
                         total: number;
+                        orphanTotal: number;
                       }
                     >();
 
@@ -2358,9 +2925,9 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                       const connected = parsedInvoice.righe.filter((r) => ddt.riferimentoLinee.includes(r.numeroLinea));
                       const active = connected.filter((r) => !excludedLines[r.numeroLinea]);
                       const activeTot = connected.length > 0
-                        ? active.reduce((s, r) => s + Math.abs(r.prezzoTotale), 0)
-                        : Math.abs(ddt.totaleDDT || 0);
-                      if (activeTot <= 0) return;
+                        ? active.reduce((s, r) => s + r.prezzoTotale, 0)
+                        : (ddt.totaleDDT || 0);
+                      if (Math.abs(activeTot) <= 0.0001) return;
 
                       const dName = getDdtDisplayName(ddt.numeroDDT);
                       const ddtFormattedTag = formatSingleDdtTag(dName, ddt.dataDDT);
@@ -2371,6 +2938,7 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                           ddtLabels: [],
                           ddtNames: [],
                           total: 0,
+                          orphanTotal: 0,
                         });
                       }
                       const entry = previewMap.get(alloc.targetCantiereId)!;
@@ -2378,6 +2946,48 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                       entry.ddtNames.push(dName);
                       entry.total += activeTot;
                     });
+
+                    // Includi anche gli oneri accessori attribuiti ai cantieri
+                    if (parsedInvoice.orphanExpenses && parsedInvoice.orphanExpenses.length > 0) {
+                      parsedInvoice.orphanExpenses.forEach((exp) => {
+                        const alloc = lineAllocations[exp.numeroLinea];
+                        if (!alloc || alloc.targetCantiereId === '__ignore__' || alloc.targetCantiereId === '__sospeso__') return;
+                        if (alloc.isSplit && alloc.splits.length > 0) {
+                          alloc.splits.forEach((sp) => {
+                            if (sp.cantiereId === '__ignore__' || sp.cantiereId === '__sospeso__' || !sp.cantiereId) return;
+                            const cantiereObj = allCantieri.find((c: Cantiere) => c.id === sp.cantiereId);
+                            if (!cantiereObj) return;
+                            if (!previewMap.has(sp.cantiereId)) {
+                              previewMap.set(sp.cantiereId, {
+                                cantiereName: `${cantiereObj.name} (${cantiereObj.client} - ${cantiereObj.city})`,
+                                ddtLabels: [],
+                                ddtNames: [],
+                                total: 0,
+                                orphanTotal: 0,
+                              });
+                            }
+                            const entry = previewMap.get(sp.cantiereId)!;
+                            entry.total += sp.amount;
+                            entry.orphanTotal = (entry.orphanTotal || 0) + sp.amount;
+                          });
+                        } else if (alloc.targetCantiereId) {
+                          const cantiereObj = allCantieri.find((c: Cantiere) => c.id === alloc.targetCantiereId);
+                          if (!cantiereObj) return;
+                          if (!previewMap.has(alloc.targetCantiereId)) {
+                            previewMap.set(alloc.targetCantiereId, {
+                              cantiereName: `${cantiereObj.name} (${cantiereObj.client} - ${cantiereObj.city})`,
+                              ddtLabels: [],
+                              ddtNames: [],
+                              total: 0,
+                              orphanTotal: 0,
+                            });
+                          }
+                          const entry = previewMap.get(alloc.targetCantiereId)!;
+                          entry.total += exp.prezzoTotale;
+                          entry.orphanTotal = (entry.orphanTotal || 0) + exp.prezzoTotale;
+                        }
+                      });
+                    }
 
                     const previewEntries = Array.from(previewMap.values());
                     if (previewEntries.length === 0) return null;
@@ -2492,6 +3102,23 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                               >
                                 {riga.descrizione}
                               </span>
+                              {riga.isReturnOrDiscount && (
+                                <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                                  <MinusCircle className="h-3 w-3" />
+                                  <span>RESO / STORNO</span>
+                                </span>
+                              )}
+                              {riga.isOrphanExpense && (
+                                <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 flex items-center gap-1">
+                                  <Tag className="h-3 w-3" />
+                                  <span>ONERE ACCESSORIO</span>
+                                </span>
+                              )}
+                              {riga.isDescriptive && (
+                                <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-slate-800 text-slate-400">
+                                  DESCRITTIVA (€ 0,00)
+                                </span>
+                              )}
                               {alloc.targetCantiereId === '__ignore__' && (
                                 <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
                                   DA NON CONSIDERARE
@@ -2508,6 +3135,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                                 className={`font-mono text-xs font-bold ${
                                   alloc.targetCantiereId === '__ignore__'
                                     ? 'text-slate-500 line-through'
+                                    : riga.prezzoTotale < 0
+                                    ? 'text-amber-400'
                                     : 'text-rose-300'
                                 }`}
                               >

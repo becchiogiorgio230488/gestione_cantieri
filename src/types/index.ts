@@ -170,18 +170,36 @@ export interface InvoiceLine {
   quantita?: number;
   unitaMisura?: string;
   prezzoUnitario?: number;
-  prezzoTotale: number;
+  prezzoTotale: number; // Segno algebrico reale conservato al centesimo
   aliquotaIVA?: number;
   codiceArticolo?: string;
   ddtNumero?: string;
   ddtData?: string;
+  isDescriptive?: boolean; // Riga puramente descrittiva o importo zero
+  isReturnOrDiscount?: boolean; // Reso / storno o sconto a valore negativo
+  isOrphanExpense?: boolean; // Oneri accessori slegati da DDT (es. spese incasso, Ri.Ba., bolli, CONAI)
+  suggestedDestination?: string; // Destinazione/cantiere estratto dalla descrizione della riga
 }
 
 export interface InvoiceDDT {
   numeroDDT: string;
   dataDDT?: string;
   riferimentoLinee: number[];
-  totaleDDT?: number;
+  totaleDDT?: number; // Somma algebrica delle linee collegate (comprensiva di eventuali resi negativi)
+  lineCount?: number;
+  destinazioneMerce?: string; // Destinazione o cantiere dedotto dal blocco DDT o dalle righe descrittive
+  hasNegativeLines?: boolean; // Indica se contiene righe di reso / storno
+  importoResi?: number; // Totale degli storni/resi negativi presenti nel DDT
+}
+
+export interface InvoiceQuadraturaInfo {
+  imponibileRiepilogo: number; // Somma imponibili da DatiRiepilogo
+  impostaRiepilogo: number; // Somma imposte da DatiRiepilogo
+  totaleRighe: number; // Somma algebrica di tutte le righe (merce + resi + oneri)
+  totaleDocumento: number; // ImportoTotaleDocumento da DatiGeneraliDocumento
+  differenzaQuadratura: number; // Scostamento tra totale righe e imponibile riepilogo
+  isQuadraturaPerfetta: boolean; // true se differenza < 0.01 €
+  arrotondamento?: number; // Eventuale arrotondamento presente nel file XML
 }
 
 export interface ParsedInvoiceXML {
@@ -196,12 +214,15 @@ export interface ParsedInvoiceXML {
     provincia?: string;
   };
   datiDocumento: {
-    tipoDocumento: string; // es. TD01
+    tipoDocumento: string; // es. TD01, TD04
+    isNotaDiCredito?: boolean; // TD04 o documento di accredito/storno
     divisa: string;
     data: string;
     numero: string;
     importoTotale: number;
     totaleImponibile: number;
+    totaleImposta?: number;
+    arrotondamento?: number;
     riepilogoIVA?: Array<{
       aliquotaIVA: number;
       imponibile: number;
@@ -212,6 +233,10 @@ export interface ParsedInvoiceXML {
   };
   ddtList: InvoiceDDT[];
   righe: InvoiceLine[];
+  // Motore di normalizzazione intelligente:
+  orphanExpenses: InvoiceLine[]; // Oneri accessori finali/orfani slegati da DDT (es. spese incasso, CONAI, spese amministrative)
+  totaleOneriAccessori: number; // Somma totale degli oneri accessori orfani
+  quadratura: InvoiceQuadraturaInfo; // Dati completi di quadratura contabile
   pdfAttachment?: AttachmentPdf;
   rawXml?: string;
 }

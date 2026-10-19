@@ -116,43 +116,51 @@ export function parseFatturaElettronicaXML(xmlString: string, fileName = 'fattur
     }
   }
 
-  // 3. Dati DDT (Documenti di Trasporto associati alla fattura)
+  // 3. Estrarre Dati DDT e preparare la mappatura avanzata
   const ddtElements = getElements(xmlDoc, 'DatiDDT');
-  const ddtList: InvoiceDDT[] = [];
-  const lineToDdtMap = new Map<number, { numeroDDT: string; dataDDT?: string }>();
+  interface RawDDT {
+    numeroDDT: string;
+    dataDDT?: string;
+    explicitLines: number[];
+  }
+  const rawDdtList: RawDDT[] = [];
 
   for (const ddtEl of ddtElements) {
-    const numeroDDT = getTagText(ddtEl, 'NumeroDDT');
-    const dataDDT = getTagText(ddtEl, 'DataDDT');
+    const numeroDDT = getTagText(ddtEl, 'NumeroDDT').trim();
+    const dataDDT = getTagText(ddtEl, 'DataDDT').trim();
     const rifLineeEl = getElements(ddtEl, 'RiferimentoNumeroLinea');
-    const riferimentoLinee: number[] = [];
+    const explicitLines: number[] = [];
 
     for (const rEl of rifLineeEl) {
       const lineNum = parseInt(rEl.textContent?.trim() || '0', 10);
       if (lineNum > 0) {
-        riferimentoLinee.push(lineNum);
-        lineToDdtMap.set(lineNum, { numeroDDT, dataDDT });
+        explicitLines.push(lineNum);
       }
     }
 
     if (numeroDDT) {
-      ddtList.push({
+      rawDdtList.push({
         numeroDDT,
-        dataDDT,
-        riferimentoLinee,
-        totaleDDT: 0,
+        dataDDT: dataDDT || undefined,
+        explicitLines,
       });
     }
   }
 
-  // 4. Righe DettaglioLinee (corpo della fattura)
+  // 4. Righe DettaglioLinee (corpo della fattura) con gestione rigorosa dei segni algebrici
   const dettaglioLineeElements = getElements(xmlDoc, 'DettaglioLinee');
   const righe: InvoiceLine[] = [];
   let calculatedLinesSum = 0;
 
-  for (const lineEl of dettaglioLineeElements) {
+  // Regex per identificare oneri accessori orfani / spese bancarie e generali
+  const ACCESSORY_EXPENSE_REGEX = /(?:spese?\s+(?:incasso|emissione|gestione|banca|bancari[ae]|postali|amministrativ[ae]|trattazione|spedizione|trasporto|servizio)|ri\.?ba\.?|contributo\s+(?:conai|ambientale)|oneri\s+accessori|bollo\s+virtuale|diritti\s+di\s+segreteria)/i;
+  // Regex per individuare indicazioni di destinazione cantiere nelle righe descrittive
+  const DESTINATION_REGEX = /(?:cantiere|destinazione|consegna(?:\s+a|\s+presso)?|rif\.?\s*(?:cantiere|lavori))\s*[:\-]?\s*([^\n\r,;]+)/i;
+
+  for (let idx = 0; idx < dettaglioLineeElements.length; idx++) {
+    const lineEl = dettaglioLineeElements[idx];
     const numLineaStr = getTagText(lineEl, 'NumeroLinea');
-    const numeroLinea = parseInt(numLineaStr, 10) || righe.length + 1;
+    const numeroLinea = parseInt(numLineaStr, 10) || idx + 1;
     const descrizione = getTagText(lineEl, 'Descrizione');
     const quantitaStr = getTagText(lineEl, 'Quantita');
     const unitaMisura = getTagText(lineEl, 'UnitaMisura');
@@ -160,19 +168,56 @@ export function parseFatturaElettronicaXML(xmlString: string, fileName = 'fattur
     const prezzoTotaleStr = getTagText(lineEl, 'PrezzoTotale');
     const aliquotaIVAStr = getTagText(lineEl, 'AliquotaIVA');
 
+    // Mantenimento esatto del segno algebrico: resi / storni hanno quantità o prezzoTotale negativo
     const quantita = quantitaStr ? parseFloat(quantitaStr.replace(',', '.')) : undefined;
     const prezzoUnitario = prezzoUnitarioStr ? parseFloat(prezzoUnitarioStr.replace(',', '.')) : undefined;
-    const prezzoTotale = prezzoTotaleStr ? parseFloat(prezzoTotaleStr.replace(',', '.')) : 0;
+    let prezzoTotale = prezzoTotaleStr ? parseFloat(prezzoTotaleStr.replace(',', '.')) : NaN;
+
+    if (isNaN(prezzoTotale)) {
+      if (quantita !== undefined && prezzoUnitario !== undefined) {
+        prezzoTotale = quantita * prezzoUnitario;
+      } else {
+        prezzoTotale = 0;
+      }
+    }
+
+    // Gestione di eventuali ScontoMaggiorazione a livello di riga
+    const scontoMaggElements = getElements(lineEl, 'ScontoMaggiorazione');
+    for (const smEl of scontoMaggElements) {
+      const tipoSM = getTagText(smEl, 'Tipo');
+      const importoSMStr = getTagText(smEl, 'Importo');
+      if (importoSMStr) {
+        const importoSM = parseFloat(importoSMStr.replace(',', '.'));
+        if (!isNaN(importoSM) && importoSM !== 0) {
+          if (tipoSM === 'SC' && isNaN(parseFloat(prezzoTotaleStr))) {
+            // Se prezzoTotale non era esplicito, applica lo sconto
+            prezzoTotale -= importoSM;
+          } else if (tipoSM === 'MG' && isNaN(parseFloat(prezzoTotaleStr))) {
+            prezzoTotale += importoSM;
+          }
+        }
+      }
+    }
+
     const aliquotaIVA = aliquotaIVAStr ? parseFloat(aliquotaIVAStr.replace(',', '.')) : undefined;
 
-    // Check for CodiceArticolo
+    // Codice Articolo
     let codiceArticolo = '';
     const codArtEl = getElements(lineEl, 'CodiceArticolo')[0];
     if (codArtEl) {
       codiceArticolo = getTagText(codArtEl, 'CodiceValore');
     }
 
-    const ddtInfo = lineToDdtMap.get(numeroLinea);
+    const roundedPrezzoTotale = Math.round(prezzoTotale * 100) / 100;
+    const isDescriptive = Math.abs(roundedPrezzoTotale) < 0.0001;
+    const isReturnOrDiscount = roundedPrezzoTotale < -0.0001 || /^(?:reso|storno|accredito|abbuono)/i.test(descrizione);
+    const isAccessory = ACCESSORY_EXPENSE_REGEX.test(descrizione);
+
+    let suggestedDestination: string | undefined;
+    const destMatch = descrizione.match(DESTINATION_REGEX);
+    if (destMatch && destMatch[1]) {
+      suggestedDestination = destMatch[1].trim().toUpperCase();
+    }
 
     righe.push({
       numeroLinea,
@@ -180,31 +225,154 @@ export function parseFatturaElettronicaXML(xmlString: string, fileName = 'fattur
       quantita,
       unitaMisura,
       prezzoUnitario,
-      prezzoTotale: isNaN(prezzoTotale) ? 0 : Math.round(prezzoTotale * 100) / 100,
+      prezzoTotale: roundedPrezzoTotale,
       aliquotaIVA,
       codiceArticolo,
-      ddtNumero: ddtInfo?.numeroDDT,
-      ddtData: ddtInfo?.dataDDT,
+      isDescriptive,
+      isReturnOrDiscount,
+      isOrphanExpense: isAccessory,
+      suggestedDestination,
     });
 
-    if (!isNaN(prezzoTotale)) {
-      calculatedLinesSum += prezzoTotale;
-    }
+    calculatedLinesSum += roundedPrezzoTotale;
   }
+  calculatedLinesSum = Math.round(calculatedLinesSum * 100) / 100;
 
-  // Calculate DDT subtotals
-  for (const ddt of ddtList) {
-    let ddtSum = 0;
-    for (const lineNum of ddt.riferimentoLinee) {
-      const match = righe.find((r) => r.numeroLinea === lineNum);
-      if (match) {
-        ddtSum += match.prezzoTotale;
+  // 5. Mappatura Dinamica dei DDT con gestione intervalli e righe descrittive/resi
+  const ddtList: InvoiceDDT[] = [];
+  const assignedLineNumbers = new Set<number>();
+
+  // A. Analisi preliminare dei DDT con riferimenti espliciti
+  for (const rawDdt of rawDdtList) {
+    const linesForDdt = new Set<number>(rawDdt.explicitLines);
+
+    // Se il DDT ha almeno 2 righe esplicite, verifica se vi sono righe intermedie
+    // (es. riga descrittiva o riga di reso con valore 0 o negativo compresa nell'intervallo)
+    if (rawDdt.explicitLines.length > 0) {
+      const minLine = Math.min(...rawDdt.explicitLines);
+      const maxLine = Math.max(...rawDdt.explicitLines);
+
+      // Includi eventuali righe intermedie tra minLine e maxLine che non appartengono ad altri DDT
+      for (const line of righe) {
+        if (line.numeroLinea > minLine && line.numeroLinea < maxLine) {
+          const isClaimedByOther = rawDdtList.some(
+            (other) => other !== rawDdt && other.explicitLines.includes(line.numeroLinea)
+          );
+          if (!isClaimedByOther) {
+            linesForDdt.add(line.numeroLinea);
+          }
+        }
+      }
+
+      // Se la riga successiva a maxLine è puramente descrittiva (es. note di cantiere / trasporto)
+      // e non è reclamata da un DDT successivo, includila
+      const nextLine = righe.find((r) => r.numeroLinea === maxLine + 1);
+      if (nextLine && nextLine.isDescriptive) {
+        const isClaimedByOther = rawDdtList.some(
+          (other) => other !== rawDdt && other.explicitLines.includes(nextLine.numeroLinea)
+        );
+        if (!isClaimedByOther) {
+          linesForDdt.add(nextLine.numeroLinea);
+        }
       }
     }
-    ddt.totaleDDT = Math.round(ddtSum * 100) / 100;
+
+    // Se il DDT ha UN SOLO puntatore di linea (start pointer), controlla se delimita un blocco sequenziale
+    if (rawDdt.explicitLines.length === 1 && rawDdtList.length > 1) {
+      // Trova l'indice del DDT corrente
+      const curIndex = rawDdtList.indexOf(rawDdt);
+      const nextDdt = rawDdtList[curIndex + 1];
+      const startLine = rawDdt.explicitLines[0];
+      const endLine = nextDdt && nextDdt.explicitLines.length > 0
+        ? Math.min(...nextDdt.explicitLines) - 1
+        : Math.max(...righe.map((r) => r.numeroLinea));
+
+      for (const line of righe) {
+        if (line.numeroLinea >= startLine && line.numeroLinea <= endLine) {
+          if (!line.isOrphanExpense) {
+            linesForDdt.add(line.numeroLinea);
+          }
+        }
+      }
+    }
+
+    const finalLines = Array.from(linesForDdt).sort((a, b) => a - b);
+    finalLines.forEach((num) => assignedLineNumbers.add(num));
+
+    // Calcolo del totale DDT al centesimo (somma algebrica: merci + eventuali resi negativi)
+    const connectedLines = righe.filter((r) => finalLines.includes(r.numeroLinea));
+    const totaleDDT = Math.round(connectedLines.reduce((acc, l) => acc + l.prezzoTotale, 0) * 100) / 100;
+    const negativeLines = connectedLines.filter((l) => l.prezzoTotale < 0);
+    const importoResi = Math.round(negativeLines.reduce((acc, l) => acc + l.prezzoTotale, 0) * 100) / 100;
+
+    // Rileva eventuale destinazione merce associata al DDT
+    let destinazioneMerce: string | undefined;
+    for (const l of connectedLines) {
+      if (l.suggestedDestination) {
+        destinazioneMerce = l.suggestedDestination;
+        break;
+      }
+    }
+
+    ddtList.push({
+      numeroDDT: rawDdt.numeroDDT,
+      dataDDT: rawDdt.dataDDT,
+      riferimentoLinee: finalLines,
+      totaleDDT,
+      lineCount: finalLines.length,
+      destinazioneMerce,
+      hasNegativeLines: negativeLines.length > 0,
+      importoResi: importoResi !== 0 ? importoResi : undefined,
+    });
   }
 
-  // 5. DatiRiepilogo (Riepilogo IVA per tutte le aliquote e calcolo Totale Imponibile)
+  // B. Gestione speciale: Se c'è 1 solo DDT senza puntatori espliciti di riga,
+  // associa automaticamente tutte le righe di merce (escluse spese bancarie/oneri accessori terminali)
+  if (ddtList.length === 1 && ddtList[0].riferimentoLinee.length === 0) {
+    const singleDdt = ddtList[0];
+    const autoLines: number[] = [];
+    for (const line of righe) {
+      if (!line.isOrphanExpense) {
+        autoLines.push(line.numeroLinea);
+        assignedLineNumbers.add(line.numeroLinea);
+      }
+    }
+    singleDdt.riferimentoLinee = autoLines;
+    const connectedLines = righe.filter((r) => autoLines.includes(r.numeroLinea));
+    singleDdt.totaleDDT = Math.round(connectedLines.reduce((acc, l) => acc + l.prezzoTotale, 0) * 100) / 100;
+    singleDdt.lineCount = autoLines.length;
+  }
+
+  // C. Aggiorna riferimenti DDT su ciascuna riga
+  const lineToDdtMap = new Map<number, { numeroDDT: string; dataDDT?: string }>();
+  for (const ddt of ddtList) {
+    for (const lineNum of ddt.riferimentoLinee) {
+      lineToDdtMap.set(lineNum, { numeroDDT: ddt.numeroDDT, dataDDT: ddt.dataDDT });
+    }
+  }
+
+  for (const line of righe) {
+    const ddtInfo = lineToDdtMap.get(line.numeroLinea);
+    if (ddtInfo) {
+      line.ddtNumero = ddtInfo.numeroDDT;
+      line.ddtData = ddtInfo.dataDDT;
+    }
+  }
+
+  // 6. Rilevamento e isolamento degli ONERI ACCESSORI ORFANI (non legati ad alcun DDT)
+  const orphanExpenses: InvoiceLine[] = [];
+  for (const line of righe) {
+    if (!line.ddtNumero) {
+      // È una riga orfana: verificare se ha importo o se è una spesa accessoria
+      if (Math.abs(line.prezzoTotale) > 0.0001 || line.isOrphanExpense) {
+        line.isOrphanExpense = true;
+        orphanExpenses.push(line);
+      }
+    }
+  }
+  const totaleOneriAccessori = Math.round(orphanExpenses.reduce((acc, l) => acc + l.prezzoTotale, 0) * 100) / 100;
+
+  // 7. DatiRiepilogo (Riepilogo IVA per tutte le aliquote e calcolo Totale Imponibile)
   const datiRiepilogoElements = getElements(xmlDoc, 'DatiRiepilogo');
   const riepilogoIVA: Array<{
     aliquotaIVA: number;
@@ -213,19 +381,27 @@ export function parseFatturaElettronicaXML(xmlString: string, fileName = 'fattur
     natura?: string;
   }> = [];
   let sumImponibiliRiepilogo = 0;
+  let sumImpostaRiepilogo = 0;
+  let explicitArrotondamento = 0;
 
   for (const rEl of datiRiepilogoElements) {
     const aliquotaIVAStr = getTagText(rEl, 'AliquotaIVA');
     const imponibileStr = getTagText(rEl, 'ImponibileImporto');
     const impostaStr = getTagText(rEl, 'Imposta');
     const natura = getTagText(rEl, 'Natura');
+    const arrotondamentoStr = getTagText(rEl, 'Arrotondamento');
 
     const aliquotaIVA = aliquotaIVAStr ? parseFloat(aliquotaIVAStr.replace(',', '.')) : 0;
     const imponibile = imponibileStr ? parseFloat(imponibileStr.replace(',', '.')) : 0;
     const imposta = impostaStr ? parseFloat(impostaStr.replace(',', '.')) : 0;
+    if (arrotondamentoStr) {
+      const arr = parseFloat(arrotondamentoStr.replace(',', '.'));
+      if (!isNaN(arr)) explicitArrotondamento += arr;
+    }
 
     if (!isNaN(imponibile) && imponibile !== 0) {
       sumImponibiliRiepilogo += imponibile;
+      sumImpostaRiepilogo += imposta;
       riepilogoIVA.push({
         aliquotaIVA,
         imponibile: Math.round(imponibile * 100) / 100,
@@ -235,23 +411,39 @@ export function parseFatturaElettronicaXML(xmlString: string, fileName = 'fattur
     }
   }
 
-  // Totale imponibile: se presenti più aliquote IVA, somma tutti gli imponibili;
-  // altrimenti usa la somma dei prezzi totali delle righe (imponibili riga per riga)
+  // Arrotondamento anche in DatiGeneraliDocumento se presente
+  if (datiGeneraliDocEl) {
+    const arrDocStr = getTagText(datiGeneraliDocEl, 'Arrotondamento');
+    if (arrDocStr) {
+      const arrDoc = parseFloat(arrDocStr.replace(',', '.'));
+      if (!isNaN(arrDoc)) explicitArrotondamento += arrDoc;
+    }
+  }
+
+  // 8. Quadratura Contabile Finale
+  const imponibileRiepilogo = Math.round(sumImponibiliRiepilogo * 100) / 100;
+  const totaleImposta = Math.round(sumImpostaRiepilogo * 100) / 100;
+
   let totaleImponibile = 0;
-  if (sumImponibiliRiepilogo !== 0) {
-    totaleImponibile = Math.round(sumImponibiliRiepilogo * 100) / 100;
-  } else if (calculatedLinesSum > 0) {
-    totaleImponibile = Math.round(calculatedLinesSum * 100) / 100;
+  if (imponibileRiepilogo !== 0) {
+    totaleImponibile = imponibileRiepilogo;
+  } else if (calculatedLinesSum !== 0) {
+    totaleImponibile = calculatedLinesSum;
   } else {
     totaleImponibile = Math.round(importoTotale * 100) / 100;
   }
 
-  // If importoTotale was 0 or missing, use calculated lines sum or imponibile
-  if (importoTotale === 0 && calculatedLinesSum > 0) {
-    importoTotale = Math.round(calculatedLinesSum * 100) / 100;
+  // Se l'importo totale documento non era presente o 0, calcolalo da imponibile + imposta
+  if (importoTotale === 0 && (totaleImponibile !== 0 || totaleImposta !== 0)) {
+    importoTotale = Math.round((totaleImponibile + totaleImposta + explicitArrotondamento) * 100) / 100;
   }
 
-  // 6. Allegati (eventuale copia PDF incorporata nell'XML della Fattura Elettronica)
+  const differenzaQuadratura = Math.round((calculatedLinesSum - totaleImponibile) * 100) / 100;
+  const isQuadraturaPerfetta = Math.abs(differenzaQuadratura) < 0.01;
+
+  const isNotaDiCredito = tipoDocumento === 'TD04' || importoTotale < 0 || totaleImponibile < 0;
+
+  // 9. Allegati (eventuale copia PDF incorporata nell'XML della Fattura Elettronica)
   let pdfAttachment: import('../types').AttachmentPdf | undefined;
   const allegatiElements = getElements(xmlDoc, 'Allegati');
   for (const aEl of allegatiElements) {
@@ -291,16 +483,30 @@ export function parseFatturaElettronicaXML(xmlString: string, fileName = 'fattur
     },
     datiDocumento: {
       tipoDocumento,
+      isNotaDiCredito,
       divisa,
       data,
       numero: numero || 'N/D',
       importoTotale: Math.round(importoTotale * 100) / 100,
       totaleImponibile,
+      totaleImposta,
+      arrotondamento: explicitArrotondamento !== 0 ? Math.round(explicitArrotondamento * 100) / 100 : undefined,
       riepilogoIVA,
       causale,
     },
     ddtList,
     righe,
+    orphanExpenses,
+    totaleOneriAccessori,
+    quadratura: {
+      imponibileRiepilogo: totaleImponibile,
+      impostaRiepilogo: totaleImposta,
+      totaleRighe: calculatedLinesSum,
+      totaleDocumento: Math.round(importoTotale * 100) / 100,
+      differenzaQuadratura,
+      isQuadraturaPerfetta,
+      arrotondamento: explicitArrotondamento !== 0 ? explicitArrotondamento : undefined,
+    },
     pdfAttachment,
     rawXml: xmlString,
   };
