@@ -9,6 +9,7 @@ import {
   Clock,
   ChevronRight,
   Cloud,
+  Hash,
 } from 'lucide-react';
 import { Artigiano, NavigationLevel } from '../types';
 import { exportBackupJSON, resetAllDataToDefaults } from '../utils/storage';
@@ -31,6 +32,7 @@ interface HeaderProps {
   onOpenXmlImport?: () => void;
   onOpenExcelImport?: () => void;
   onOpenSupabaseSync?: () => void;
+  onOpenProtocolSearch?: () => void;
   onResetData: () => void;
 }
 
@@ -48,6 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenNewArtigiano,
   onOpenExcelImport,
   onOpenSupabaseSync,
+  onOpenProtocolSearch,
   onResetData,
 }) => {
   const currentArtigiano =
@@ -93,8 +96,22 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           </div>
 
-          {/* Quick Actions: Solo Nuovo Cliente e Backup */}
+          {/* Quick Actions */}
           <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* Cerca Protocollo */}
+            {onOpenProtocolSearch && (
+              <button
+                type="button"
+                onClick={onOpenProtocolSearch}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-all shadow-sm cursor-pointer"
+                title="Cerca fatture per numero di protocollo (N./PROT) e visualizza le ripartizioni e totali"
+              >
+                <Hash className="h-4 w-4 text-amber-400" />
+                <span className="hidden sm:inline">Cerca Protocollo</span>
+                <span className="sm:hidden">Protocollo</span>
+              </button>
+            )}
+
             {/* Nuovo Cliente */}
             <button
               onClick={onOpenNewArtigiano}

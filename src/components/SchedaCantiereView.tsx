@@ -24,6 +24,7 @@ import {
   ArrowRightLeft,
   FileText,
   Paperclip,
+  Hash,
 } from 'lucide-react';
 import { Cantiere, Movement, SospesoItem, AttachmentPdf } from '../types';
 import { calculateCantiereTotals, formatCurrency, formatDateItalian, getTodayISODate } from '../utils/calculations';
@@ -61,6 +62,7 @@ interface SchedaCantiereViewProps {
   onOpenXmlImport: () => void;
   onOpenExcelImport?: () => void;
   onOpenFatturaEmessa: () => void;
+  onOpenProtocolSearch?: (initialProtocol?: string) => void;
   onPrint: () => void;
 }
 
@@ -81,6 +83,7 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
   onOpenXmlImport,
   onOpenExcelImport,
   onOpenFatturaEmessa,
+  onOpenProtocolSearch,
   onPrint,
 }) => {
   const totals = calculateCantiereTotals(cantiere);
@@ -468,6 +471,18 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
             >
               <FileSpreadsheet className="h-3.5 w-3.5 text-teal-200" />
               <span>Importa da Excel</span>
+            </button>
+          )}
+
+          {onOpenProtocolSearch && (
+            <button
+              type="button"
+              onClick={() => onOpenProtocolSearch()}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-sm"
+              title="Cerca fattura per Numero di Protocollo (N./PROT) e visualizza la ripartizione dei costi nei cantieri e totali"
+            >
+              <Hash className="h-3.5 w-3.5 text-amber-400" />
+              <span>Cerca Protocollo</span>
             </button>
           )}
 
@@ -1151,7 +1166,24 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                       </td>
 
                       {/* N./PROT */}
-                      <td className="py-3 px-3 font-mono text-slate-400 text-xs">{m.protocol || '-'}</td>
+                      <td className="py-3 px-3 font-mono text-xs">
+                        {m.protocol && m.protocol !== '-' ? (
+                          onOpenProtocolSearch ? (
+                            <button
+                              type="button"
+                              onClick={() => onOpenProtocolSearch(m.protocol)}
+                              className="px-2 py-0.5 rounded bg-slate-800 hover:bg-amber-400 hover:text-slate-950 text-amber-300 font-bold border border-slate-700/80 hover:border-amber-400 transition-all cursor-pointer inline-flex items-center gap-1 shadow-sm"
+                              title={`Cerca tutte le imputazioni e totali della fattura con protocollo #${m.protocol}`}
+                            >
+                              <span>#{m.protocol}</span>
+                            </button>
+                          ) : (
+                            <span className="text-slate-300 font-bold">#{m.protocol}</span>
+                          )
+                        ) : (
+                          <span className="text-slate-600">-</span>
+                        )}
+                      </td>
 
                       {/* ACQUISTI */}
                       <td className={`py-3 px-4 text-right font-mono font-medium ${m.purchases < 0 ? 'text-purple-300 font-bold' : 'text-rose-300'}`}>

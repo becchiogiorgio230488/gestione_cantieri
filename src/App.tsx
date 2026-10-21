@@ -13,6 +13,7 @@ import { PrintableView } from './components/PrintableView';
 import { PrintableProspettoReport } from './components/PrintableProspettoReport';
 import { PrintableSospesiReport } from './components/PrintableSospesiReport';
 import { SupabaseSyncModal } from './components/SupabaseSyncModal';
+import { ProtocolSearchModal } from './components/ProtocolSearchModal';
 import {
   Artigiano,
   Cantiere,
@@ -82,6 +83,15 @@ export default function App() {
   const [isXmlModalOpen, setIsXmlModalOpen] = useState(false);
   const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
   const [isFatturaEmessaModalOpen, setIsFatturaEmessaModalOpen] = useState(false);
+
+  // Ricerca fattura per Numero di Protocollo (N./PROT)
+  const [isProtocolSearchOpen, setIsProtocolSearchOpen] = useState(false);
+  const [protocolSearchInitialQuery, setProtocolSearchInitialQuery] = useState('');
+
+  const handleOpenProtocolSearch = (initialQuery?: string) => {
+    setProtocolSearchInitialQuery(initialQuery || '');
+    setIsProtocolSearchOpen(true);
+  };
 
   // Notification Toast
   const [notification, setNotification] = useState<string | null>(null);
@@ -1653,6 +1663,7 @@ export default function App() {
         onOpenFatturaEmessa={() => setIsFatturaEmessaModalOpen(true)}
         onOpenXmlImport={() => setIsXmlModalOpen(true)}
         onOpenExcelImport={() => setIsExcelModalOpen(true)}
+        onOpenProtocolSearch={() => handleOpenProtocolSearch()}
         onResetData={() => {
           const reloaded = resetAllDataToDefaults();
           setArtigiani(reloaded);
@@ -1706,6 +1717,7 @@ export default function App() {
             onOpenXmlImport={() => setIsXmlModalOpen(true)}
             onOpenExcelImport={() => setIsExcelModalOpen(true)}
             onOpenFatturaEmessa={() => setIsFatturaEmessaModalOpen(true)}
+            onOpenProtocolSearch={handleOpenProtocolSearch}
             onNavigateToSospesi={() => setNavLevel('scheda_sospesi')}
             onUpdateQuadratura={handleUpdateQuadratura}
             onPrintProspetto={(date) => {
@@ -1739,6 +1751,7 @@ export default function App() {
             onOpenXmlImport={() => setIsXmlModalOpen(true)}
             onOpenExcelImport={() => setIsExcelModalOpen(true)}
             onOpenFatturaEmessa={() => setIsFatturaEmessaModalOpen(true)}
+            onOpenProtocolSearch={handleOpenProtocolSearch}
             onPrint={() => setIsPrintCantiereView(true)}
           />
         )}
@@ -1847,6 +1860,22 @@ export default function App() {
           }
         }}
         onShowNotification={showNotification}
+      />
+
+      {/* Modal 6: Ricerca Fattura per Numero di Protocollo (N./PROT) */}
+      <ProtocolSearchModal
+        isOpen={isProtocolSearchOpen}
+        onClose={() => setIsProtocolSearchOpen(false)}
+        cantieri={currentArtigiano?.cantieri || []}
+        sospesi={currentArtigiano?.sospesi || []}
+        initialProtocol={protocolSearchInitialQuery}
+        onNavigateToCantiere={(cId) => {
+          setSelectedCantiereId(cId);
+          setNavLevel('scheda_cantiere');
+        }}
+        onNavigateToSospesi={() => {
+          setNavLevel('scheda_sospesi');
+        }}
       />
     </div>
   );

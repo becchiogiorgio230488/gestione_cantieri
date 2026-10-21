@@ -142,6 +142,17 @@ export const INITIAL_ARTIGIANI: Artigiano[] = [
             notes: 'Stato avanzamento dorsali dati e quadri secondari',
             source: 'fattura_emessa',
           },
+          {
+            id: 'mov-ut-02',
+            date: '2026-01-25',
+            docNumber: 'FT-SONE-0991',
+            typeAndSubject: 'SONEPAR ITALIA SPA - Cavi dati Cat.6A e canaline',
+            protocol: 'FORN-019',
+            purchases: 680.0,
+            issued: 0,
+            notes: 'Quota fattura Sonepar imputata a Tech Hub (DDT 2)',
+            source: 'xml',
+          },
         ],
       },
       {

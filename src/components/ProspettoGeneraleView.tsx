@@ -26,6 +26,7 @@ import {
   Calendar,
   X,
   Loader2,
+  Hash,
 } from 'lucide-react';
 import { Artigiano, Cantiere, QuadraturaContabile, MastrinoItem } from '../types';
 import {
@@ -58,6 +59,7 @@ interface ProspettoGeneraleViewProps {
   onNavigateToSospesi: () => void;
   onUpdateQuadratura: (updated: QuadraturaContabile) => void;
   onPrintProspetto: (dataAggiornamento?: string) => void;
+  onOpenProtocolSearch?: (initialProtocol?: string) => void;
   onUpdateCantiere?: (cantiere: Cantiere) => void;
   onEditArtigiano?: (artigiano: Artigiano) => void;
   onDeleteArtigiano?: (artigianoId: string) => void;
@@ -76,6 +78,7 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
   onNavigateToSospesi,
   onUpdateQuadratura,
   onPrintProspetto,
+  onOpenProtocolSearch,
   onUpdateCantiere,
   onEditArtigiano,
   onDeleteArtigiano,
@@ -558,6 +561,19 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
               </span>
             </button>
 
+            {/* Cerca Protocollo */}
+            {onOpenProtocolSearch && (
+              <button
+                type="button"
+                onClick={() => onOpenProtocolSearch()}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-all shadow-sm cursor-pointer"
+                title="Cerca fattura per Numero di Protocollo (N./PROT) e visualizza la ripartizione dei costi nei cantieri e totali"
+              >
+                <Hash className="h-4 w-4 text-amber-400" />
+                <span>Cerca Protocollo</span>
+              </button>
+            )}
+
             {/* XML Import */}
             <button
               onClick={onOpenXmlImport}
@@ -647,16 +663,30 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
             </span>
           </div>
 
-          {/* Search Input */}
-          <div className="relative w-full sm:w-80">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Cerca cliente, cantiere, città o via..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
-            />
+          {/* Search Inputs: By name/city and By Protocol */}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Cerca cliente, cantiere, città o via..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+              />
+            </div>
+            {onOpenProtocolSearch && (
+              <button
+                type="button"
+                onClick={() => onOpenProtocolSearch()}
+                className="shrink-0 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 hover:border-amber-400/50 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                title="Cerca fatture per Numero di Protocollo (N./PROT)"
+              >
+                <Hash className="h-3.5 w-3.5 text-amber-400" />
+                <span className="hidden md:inline">Cerca Prot.</span>
+                <span className="md:hidden">Prot.</span>
+              </button>
+            )}
           </div>
         </div>
 
