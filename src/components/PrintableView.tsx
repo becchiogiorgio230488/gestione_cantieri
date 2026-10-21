@@ -1,8 +1,9 @@
 import React from 'react';
-import { Printer, ArrowLeft, Download } from 'lucide-react';
+import { Printer, ArrowLeft, Download, FileText } from 'lucide-react';
 import { Cantiere } from '../types';
 import { calculateCantiereTotals, formatCurrency, formatDateItalian } from '../utils/calculations';
 import { exportSingleCantiereExcel } from '../utils/excelExport';
+import { exportSingleCantierePdf } from '../utils/pdfExport';
 
 interface PrintableViewProps {
   cantiere: Cantiere;
@@ -15,8 +16,17 @@ export const PrintableView: React.FC<PrintableViewProps> = ({ cantiere, dittaNam
   const ri = Number(cantiere.initialInventory) || 0;
   const finalDitta = (dittaName || 'IMPRESA').toUpperCase();
   const committenteNome = (cantiere.client || cantiere.name || '').toUpperCase();
-  const movements = cantiere.movements || [];
-  const minRows = 16;
+  const nomeCantiere = (cantiere.name || '').toUpperCase();
+  const cittaCantiere = (cantiere.city || '').toUpperCase();
+  const indirizzoCantiere = (cantiere.address || '').toUpperCase();
+  const fullLoc = indirizzoCantiere ? `${cittaCantiere} - ${indirizzoCantiere}` : cittaCantiere;
+  const anno = cantiere.year || 2026;
+  const dataStampa = new Date().toLocaleDateString('it-IT');
+  const percSign = totals.marginePercentuale >= 0 ? '+' : '';
+  const percFormatted = `${percSign}${totals.marginePercentuale}%`;
+
+  const movements = Array.isArray(cantiere.movements) ? cantiere.movements : [];
+  const minRows = 37;
   const emptyRowsCount = Math.max(0, minRows - movements.length);
 
   return (
@@ -31,211 +41,202 @@ export const PrintableView: React.FC<PrintableViewProps> = ({ cantiere, dittaNam
           <span>Torna all'Applicazione</span>
         </button>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={() => exportSingleCantiereExcel(cantiere, dittaName)}
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold cursor-pointer transition-all shadow-sm"
+            title="Scarica file Excel (.xlsx)"
           >
             <Download className="h-4 w-4" />
             <span>Salva Excel (.xlsx)</span>
           </button>
 
           <button
+            onClick={() => exportSingleCantierePdf(cantiere, dittaName)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold cursor-pointer transition-all shadow-sm"
+            title="Scarica file PDF (.pdf) direttamente generato come l'XLS"
+          >
+            <FileText className="h-4 w-4" />
+            <span>Scarica PDF Diretto</span>
+          </button>
+
+          <button
             onClick={() => window.print()}
             className="inline-flex items-center gap-1.5 px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-black cursor-pointer shadow transition-all"
+            title="Stampa su carta o salva come PDF dal browser"
           >
             <Printer className="h-4 w-4" />
-            <span>Stampa / Salva in PDF</span>
+            <span>Stampa / PDF Browser</span>
           </button>
         </div>
       </div>
 
-      {/* Official Sheet Paper Layout (A4 Single Page) */}
-      <div className="max-w-4xl mx-auto bg-white text-black border border-slate-400 p-6 sm:p-7 print:p-0 print:border-none shadow-sm print:shadow-none print:w-full print:max-w-none">
-        {/* Banner */}
-        <div className="border-b-2 border-slate-900 pb-2 mb-3 flex justify-between items-end">
-          <div>
-            <h1 className="text-base sm:text-lg font-black tracking-tight text-slate-900 uppercase">
-              SCHEDA CANTIERE • RIEPILOGO CONTABILE
-            </h1>
-          </div>
-          <div className="text-right text-xs text-slate-500 font-mono">
-            Data emissione: {new Date().toLocaleDateString('it-IT')}
-          </div>
-        </div>
-
-        {/* Intestazione Cantiere (Header info):
-            Blocchi ben evidenziati:
-            CANTIERE: [Nome Cantiere] | DITTA: [Nome Ditta]
-            CITTA': [Città - Indirizzo] | ANNO: [Anno]
-            DEL: [Nome Committente CENTRATO] | DATA: [Data Odierna] */}
-        <div className="border-2 border-slate-900 bg-slate-50 mb-3 text-xs">
-          {/* Riga 1: CANTIERE | DITTA */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 border-b border-slate-300">
-            <div className="p-2 border-b sm:border-b-0 sm:border-r border-slate-300 flex items-center justify-between">
-              <span className="font-bold text-slate-600 uppercase text-[10px] w-20 shrink-0">CANTIERE:</span>
-              <span className="font-black text-slate-950 text-sm uppercase text-right flex-1 truncate">
-                {cantiere.name.toUpperCase()}
-              </span>
-            </div>
-            <div className="p-2 flex items-center justify-between bg-white sm:bg-transparent">
-              <span className="font-bold text-slate-600 uppercase text-[10px] w-16 shrink-0">DITTA:</span>
-              <span className="font-black text-slate-950 text-sm uppercase text-right flex-1 truncate">
+      {/* Official Sheet Paper Layout (Matching Excel XLS layout) */}
+      <div className="max-w-4xl mx-auto bg-white text-black border border-black p-6 sm:p-7 print:p-0 print:border-none shadow-sm print:shadow-none print:w-full print:max-w-none">
+        {/* Intestazione Cantiere (4 Righe identiche a Excel XLS) */}
+        <table className="w-full border-collapse text-xs mb-3 border border-black">
+          <tbody>
+            {/* Riga 1: CANTIERE | NOME | DITTA | DITTA NOME */}
+            <tr className="border-b border-black">
+              <td className="w-24 bg-[#F2F2F2] p-1.5 font-bold text-center border-r border-black uppercase text-[10px]">
+                CANTIERE:
+              </td>
+              <td className="p-1.5 font-bold text-center border-r border-black uppercase text-sm" colSpan={3}>
+                {nomeCantiere}
+              </td>
+              <td className="w-20 bg-[#F2F2F2] p-1.5 font-bold text-center border-r border-black uppercase text-[10px]">
+                DITTA:
+              </td>
+              <td className="w-44 p-1.5 font-bold text-center uppercase text-xs">
                 {finalDitta}
-              </span>
-            </div>
-          </div>
+              </td>
+            </tr>
 
-          {/* Riga 2: CITTA' | ANNO */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 border-b border-slate-300">
-            <div className="p-2 border-b sm:border-b-0 sm:border-r border-slate-300 flex items-center justify-between">
-              <span className="font-bold text-slate-600 uppercase text-[10px] w-20 shrink-0">CITTA':</span>
-              <span className="font-bold text-slate-800 uppercase text-right flex-1 truncate">
-                {cantiere.city.toUpperCase()}{cantiere.address ? ` - ${cantiere.address.toUpperCase()}` : ''}
-              </span>
-            </div>
-            <div className="p-2 flex items-center justify-between">
-              <span className="font-bold text-slate-600 uppercase text-[10px] w-16 shrink-0">ANNO:</span>
-              <span className="font-black text-slate-950 text-sm font-mono text-right flex-1">
-                {cantiere.year || 2026}
-              </span>
-            </div>
-          </div>
+            {/* Riga 2: CITTA' | LOCALITA' | ANNO | ANNO NUM */}
+            <tr className="border-b border-black">
+              <td className="bg-[#F2F2F2] p-1.5 font-bold text-center border-r border-black uppercase text-[10px]">
+                CITTA':
+              </td>
+              <td className="p-1.5 font-bold text-center border-r border-black uppercase text-xs" colSpan={3}>
+                {fullLoc}
+              </td>
+              <td className="bg-[#F2F2F2] p-1.5 font-bold text-center border-r border-black uppercase text-[10px]">
+                ANNO:
+              </td>
+              <td className="p-1.5 font-bold text-center font-mono text-xs">
+                {anno}
+              </td>
+            </tr>
 
-          {/* Riga 3: DEL [Nome Committente CENTRATO] | DATA */}
-          <div className="grid grid-cols-1 sm:grid-cols-2">
-            <div className="p-2 border-b sm:border-b-0 sm:border-r border-slate-300 flex items-center">
-              <span className="font-bold text-slate-600 uppercase text-[10px] w-14 shrink-0">DEL:</span>
-              <span className="font-extrabold text-slate-950 text-sm uppercase flex-1 text-center truncate px-2">
+            {/* Riga 3: DEL | COMMITTENTE | DATA | DATA STAMPA */}
+            <tr className="border-b border-black">
+              <td className="bg-[#F2F2F2] p-1.5 font-bold text-center border-r border-black uppercase text-[10px]">
+                DEL:
+              </td>
+              <td className="p-1.5 font-bold text-center border-r border-black uppercase text-xs" colSpan={3}>
                 {committenteNome}
-              </span>
-            </div>
-            <div className="p-2 flex items-center justify-between">
-              <span className="font-bold text-slate-600 uppercase text-[10px] w-16 shrink-0">DATA:</span>
-              <span className="font-semibold text-slate-900 font-mono text-right flex-1">
-                {new Date().toLocaleDateString('it-IT')}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Tabella Movimenti Cantiere
-            Colonne: DATA DOC. | N° DOC. | TIPO DOC. / FORNITORE / CLIENTE | N./PROT | ACQUISTI | EMESSE */}
-        <table className="w-full text-left border-collapse text-xs mb-3 border border-slate-400">
-          <thead>
-            <tr className="bg-slate-100 border-b-2 border-slate-900 uppercase text-[10px] font-bold text-slate-900">
-              <th className="p-1.5 border border-slate-400 text-center w-24">DATA DOC.</th>
-              <th className="p-1.5 border border-slate-400 text-center w-24">N° DOC.</th>
-              <th className="p-1.5 border border-slate-400">TIPO DOC. / FORNITORE / CLIENTE</th>
-              <th className="p-1.5 border border-slate-400 text-center w-20">N./PROT</th>
-              <th className="p-1.5 border border-slate-400 text-right w-28">ACQUISTI</th>
-              <th className="p-1.5 border border-slate-400 text-right w-28">EMESSE</th>
-            </tr>
-          </thead>
-          <tbody className="text-slate-800">
-            {/* Prima riga della tabella: Riga dedicata alle RIMANENZE INIZIALI (R.I.) */}
-            <tr className="bg-slate-50/70 border-b border-slate-300 font-bold">
-              <td className="p-1.5 border border-slate-300 text-center text-slate-400">-</td>
-              <td className="p-1.5 border border-slate-300 text-center text-slate-400">-</td>
-              <td className="p-1.5 border border-slate-300 text-slate-950 font-bold">RIMANENZE INIZIALI (R.I.)</td>
-              <td className="p-1.5 border border-slate-300 text-center text-slate-400">-</td>
-              <td className="p-1.5 border border-slate-300 text-right font-mono text-slate-950 font-bold">
-                {ri !== 0 ? formatCurrency(ri) : '-'}
               </td>
-              <td className="p-1.5 border border-slate-300 text-right font-mono text-slate-400">-</td>
-            </tr>
-
-            {/* Movimenti del Cantiere */}
-            {movements.map((m) => (
-              <tr key={m.id} className="hover:bg-slate-50/50">
-                <td className="p-1.5 border border-slate-300 text-center font-mono text-[11px] whitespace-nowrap">
-                  {formatDateItalian(m.date)}
-                </td>
-                <td className="p-1.5 border border-slate-300 text-center font-semibold font-mono">{m.docNumber || '-'}</td>
-                <td className="p-1.5 border border-slate-300 font-medium text-slate-900">
-                  {m.typeAndSubject}
-                  {m.notes && <span className="block text-[10px] text-slate-500">{m.notes}</span>}
-                </td>
-                <td className="p-1.5 border border-slate-300 text-center font-mono text-[11px]">{m.protocol || '-'}</td>
-                <td className="p-1.5 border border-slate-300 text-right font-mono">
-                  {m.purchases !== 0 ? formatCurrency(m.purchases) : '-'}
-                </td>
-                <td className={`p-1.5 border border-slate-300 text-right font-mono font-bold ${m.issued < 0 ? 'text-purple-700' : 'text-slate-950'}`}>
-                  {m.issued !== 0 ? formatCurrency(m.issued) : '-'}
-                </td>
-              </tr>
-            ))}
-
-            {/* Righe vuote per riempire tutta la pagina A4 in caso di pochi movimenti */}
-            {emptyRowsCount > 0 &&
-              Array.from({ length: emptyRowsCount }).map((_, idx) => (
-                <tr key={`empty-row-${idx}`} className="h-6">
-                  <td className="p-1.5 border border-slate-300 text-center text-transparent select-none">-</td>
-                  <td className="p-1.5 border border-slate-300 text-center text-transparent select-none">-</td>
-                  <td className="p-1.5 border border-slate-300 text-transparent select-none">&nbsp;</td>
-                  <td className="p-1.5 border border-slate-300 text-center text-transparent select-none">-</td>
-                  <td className="p-1.5 border border-slate-300 text-right text-transparent select-none">-</td>
-                  <td className="p-1.5 border border-slate-300 text-right text-transparent select-none">-</td>
-                </tr>
-              ))}
-
-            {/* Righe Totali finali:
-                Riga 1: Totale senza RI (somma acquisti e vendite emesse dell'anno).
-                Riga 2: Totale comprensivo di RI (somma totale inclusa rimanenza iniziale). */}
-            <tr className="border-t-4 border-double border-slate-900 bg-slate-100 font-bold text-xs text-slate-950">
-              <td className="p-1.5 border border-slate-400" colSpan={3}></td>
-              <td className="p-1.5 border border-slate-400 text-right font-bold uppercase whitespace-nowrap">
-                Totale senza RI
+              <td className="bg-[#F2F2F2] p-1.5 font-bold text-center border-r border-black uppercase text-[10px]">
+                DATA:
               </td>
-              <td className="p-1.5 border border-slate-400 text-right font-mono font-bold">
-                {formatCurrency(totals.totaleAcquisti)}
-              </td>
-              <td className="p-1.5 border border-slate-400 text-right font-mono font-bold">
-                {formatCurrency(totals.totaleEmesse)}
+              <td className="p-1.5 font-bold text-center font-mono text-xs">
+                {dataStampa}
               </td>
             </tr>
 
-            <tr className="border-b-2 border-slate-900 bg-slate-200/90 font-black text-xs text-slate-950">
-              <td className="p-1.5 border border-slate-400" colSpan={3}></td>
-              <td className="p-1.5 border border-slate-400 text-right font-bold uppercase whitespace-nowrap">
-                Totale comprensivo di RI
+            {/* Riga 4: % UTILE | MARGINE % | UTILE EFF. | IMPORTO € */}
+            <tr>
+              <td className="bg-[#F2F2F2] p-1.5 font-bold text-center border-r border-black uppercase text-[10px]">
+                % UTILE:
               </td>
-              <td className="p-1.5 border border-slate-400 text-right font-mono font-black">
-                {formatCurrency(totals.totaleAcquistiConRI)}
+              <td
+                className={`p-1.5 font-black text-center border-r border-black text-sm ${
+                  totals.isPositive ? 'bg-[#E8F5E9] text-[#047857]' : 'bg-[#FFEBEE] text-[#BE123C]'
+                }`}
+                colSpan={3}
+              >
+                {percFormatted}
               </td>
-              <td className="p-1.5 border border-slate-400 text-right font-mono font-black">
-                {formatCurrency(totals.totaleEmesse)}
+              <td className="bg-[#F2F2F2] p-1.5 font-bold text-center border-r border-black uppercase text-[10px]">
+                UTILE EFF.:
+              </td>
+              <td
+                className={`p-1.5 font-black text-center font-mono text-xs ${
+                  totals.isPositive ? 'bg-[#E8F5E9] text-[#047857]' : 'bg-[#FFEBEE] text-[#BE123C]'
+                }`}
+              >
+                {formatCurrency(totals.margineEffettivo)}
               </td>
             </tr>
           </tbody>
         </table>
 
-        {/* Margine Cantiere Summary */}
-        <div className="border border-slate-400 bg-slate-50 p-2.5 mb-3 flex justify-between items-center text-xs">
-          <span className="font-bold text-slate-900 uppercase">
-            MARGINE / UTILE EFFETTIVO DI CANTIERE:
-          </span>
-          <div className="flex items-center gap-4 font-mono">
-            <span className={`text-base font-extrabold ${totals.isPositive ? 'text-emerald-700' : 'text-rose-700'}`}>
-              {formatCurrency(totals.margineEffettivo)}
-            </span>
-            <span className="text-xs bg-slate-200 border border-slate-300 px-2 py-0.5 rounded font-bold text-slate-900">
-              Margine: {totals.marginePercentuale}%
-            </span>
-          </div>
-        </div>
+        {/* Tabella Movimenti Cantiere
+            Colonne: DATA DOC. | N° DOC. | TIPO DOC. / FORNITORE / CLIENTE | N./PROT | ACQUISTI | EMESSE */}
+        <table className="w-full text-left border-collapse text-xs mb-3 border border-black">
+          <thead>
+            <tr className="bg-[#EAEAEA] border-b border-black uppercase text-[10px] font-bold text-black">
+              <th className="p-1.5 border border-black text-center w-24">DATA DOC.</th>
+              <th className="p-1.5 border border-black text-center w-24">N° DOC.</th>
+              <th className="p-1.5 border border-black">TIPO DOC. / FORNITORE / CLIENTE</th>
+              <th className="p-1.5 border border-black text-center w-20">N./PROT</th>
+              <th className="p-1.5 border border-black text-right w-28">ACQUISTI</th>
+              <th className="p-1.5 border border-black text-right w-28">EMESSE</th>
+            </tr>
+          </thead>
+          <tbody className="text-black">
+            {/* Prima riga della tabella: RIMANENZE INIZIALI (R.I.) */}
+            <tr className="border-b border-black font-bold">
+              <td className="p-1.5 border border-black text-center">-</td>
+              <td className="p-1.5 border border-black text-center">-</td>
+              <td className="p-1.5 border border-black text-black font-bold">RIMANENZE INIZIALI (R.I.)</td>
+              <td className="p-1.5 border border-black text-center">-</td>
+              <td className="p-1.5 border border-black text-right font-mono text-black font-bold">
+                {ri !== 0 ? formatCurrency(ri) : '-'}
+              </td>
+              <td className="p-1.5 border border-black text-right font-mono text-black">-</td>
+            </tr>
 
-        {/* Signature Line */}
-        <div className="pt-3 border-t border-slate-300 flex justify-between items-end text-xs text-slate-600">
-          <div>
-            <span>Timbro e Firma Responsabile Cantiere:</span>
-            <div className="mt-6 border-b border-slate-400 w-48" />
-          </div>
-          <div>
-            <span>Firma Amministrazione / Contabilità:</span>
-            <div className="mt-6 border-b border-slate-400 w-48" />
-          </div>
-        </div>
+            {/* Movimenti del Cantiere */}
+            {movements.map((m) => (
+              <tr key={m.id} className="border-b border-black">
+                <td className="p-1.5 border border-black text-center font-mono text-[11px] whitespace-nowrap">
+                  {formatDateItalian(m.date)}
+                </td>
+                <td className="p-1.5 border border-black text-center font-semibold font-mono">{m.docNumber || '-'}</td>
+                <td className="p-1.5 border border-black font-medium text-black">
+                  {m.typeAndSubject}
+                  {m.notes && <span className="block text-[10px] text-slate-600">{m.notes}</span>}
+                </td>
+                <td className="p-1.5 border border-black text-center font-mono text-[11px]">{m.protocol || '-'}</td>
+                <td className="p-1.5 border border-black text-right font-mono">
+                  {m.purchases !== 0 ? formatCurrency(m.purchases) : '-'}
+                </td>
+                <td className={`p-1.5 border border-black text-right font-mono font-bold ${m.issued < 0 ? 'text-purple-700' : 'text-black'}`}>
+                  {m.issued !== 0 ? formatCurrency(m.issued) : '-'}
+                </td>
+              </tr>
+            ))}
+
+            {/* Righe vuote per avere almeno 37 righe fisse come nel foglio Excel */}
+            {emptyRowsCount > 0 &&
+              Array.from({ length: emptyRowsCount }).map((_, idx) => (
+                <tr key={`empty-row-${idx}`} className="h-5 border-b border-black">
+                  <td className="p-1 border border-black text-center text-transparent select-none">&nbsp;</td>
+                  <td className="p-1 border border-black text-center text-transparent select-none">&nbsp;</td>
+                  <td className="p-1 border border-black text-transparent select-none">&nbsp;</td>
+                  <td className="p-1 border border-black text-center text-transparent select-none">&nbsp;</td>
+                  <td className="p-1 border border-black text-right text-transparent select-none">&nbsp;</td>
+                  <td className="p-1 border border-black text-right text-transparent select-none">&nbsp;</td>
+                </tr>
+              ))}
+
+            {/* Righe Totali finali (Celle A-D unite, allineate a sinistra con indent e bordi sottili come Excel) */}
+            <tr className="border-b border-black font-bold text-xs text-black">
+              <td className="p-1.5 border border-black text-left font-bold pl-3" colSpan={4}>
+                Totale senza RI
+              </td>
+              <td className="p-1.5 border border-black text-right font-mono font-bold bg-[#F2F2F2]">
+                {formatCurrency(totals.totaleAcquisti)}
+              </td>
+              <td className="p-1.5 border border-black text-right font-mono font-bold bg-[#F2F2F2]">
+                {formatCurrency(totals.totaleEmesse)}
+              </td>
+            </tr>
+
+            <tr className="border-b border-black font-black text-xs text-black">
+              <td className="p-1.5 border border-black text-left font-bold pl-3" colSpan={4}>
+                Totale comprensivo di RI
+              </td>
+              <td className="p-1.5 border border-black text-right font-mono font-black bg-[#E6E6E6]">
+                {formatCurrency(totals.totaleAcquistiConRI)}
+              </td>
+              <td className="p-1.5 border border-black text-right font-mono font-black bg-[#E6E6E6]">
+                {formatCurrency(totals.totaleEmesse)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   );

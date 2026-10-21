@@ -1,12 +1,14 @@
 import React from 'react';
-import { ArrowLeft, Printer, Download, Building } from 'lucide-react';
+import { ArrowLeft, Printer, Download, Building, FileText } from 'lucide-react';
 import { Artigiano } from '../types';
 import {
   calculateCantiereTotals,
+  calculateArtigianoTotals,
   computeCantiereRF,
   formatAccountingCurrency,
 } from '../utils/calculations';
 import { exportProspettoGeneraleExcel } from '../utils/excelExport';
+import { exportProspettoGeneralePdf } from '../utils/pdfExport';
 
 interface PrintableProspettoReportProps {
   artigiano: Artigiano;
@@ -62,6 +64,8 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
       acquisti: acq,
       emesse: eme,
       rf,
+      marginePercentuale: t.marginePercentuale,
+      isPositive: t.isPositive,
     };
   });
 
@@ -93,9 +97,18 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
   const dataStampa = new Date().toLocaleDateString('it-IT');
 
   return (
-    <div className="bg-white text-black min-h-screen p-6 sm:p-10 font-sans">
+    <div className="bg-white text-black min-h-screen p-6 sm:p-10 font-sans print:p-2">
+      <style>{`
+        @media print {
+          @page {
+            size: A4 landscape;
+            margin: 8mm 8mm 8mm 8mm;
+          }
+        }
+      `}</style>
+
       {/* Controls (hidden on print) */}
-      <div className="no-print max-w-5xl mx-auto mb-8 p-4 bg-slate-900 text-white rounded-xl flex items-center justify-between shadow-lg">
+      <div className="no-print max-w-6xl mx-auto mb-8 p-4 bg-slate-900 text-white rounded-xl flex items-center justify-between shadow-lg">
         <button
           onClick={onBack}
           className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold cursor-pointer"
@@ -107,18 +120,29 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
         <div className="flex items-center gap-2.5">
           <button
             onClick={() => exportProspettoGeneraleExcel(artigiano, undefined, undefined, currentDataAggiornamento)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold cursor-pointer shadow-sm transition-all"
+            title="Scarica foglio di calcolo Excel (.xlsx) con formule e quadratura"
           >
             <Download className="h-4 w-4" />
             <span>Salva Excel (.xlsx)</span>
           </button>
 
           <button
+            onClick={() => exportProspettoGeneralePdf(artigiano, currentDataAggiornamento)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold cursor-pointer shadow-sm transition-all"
+            title="Scarica file PDF (.pdf) direttamente generato identico all'XLS"
+          >
+            <FileText className="h-4 w-4" />
+            <span>Scarica PDF Diretto</span>
+          </button>
+
+          <button
             onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-black cursor-pointer shadow"
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-black cursor-pointer shadow transition-all"
+            title="Stampa su carta o salva come PDF dal browser in formato orizzontale A4"
           >
             <Printer className="h-4 w-4" />
-            <span>Stampa PDF / A4</span>
+            <span>Stampa / PDF Browser</span>
           </button>
         </div>
       </div>
@@ -148,17 +172,18 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
           </div>
         </div>
 
-        {/* Tabella Principale Cantieri con riga SOSPESI */}
+        {/* Tabella Principale Cantieri con riga SOSPESI e % UTILE */}
         <table className="w-full text-left border-collapse text-xs mb-6 border border-slate-400">
           <thead>
             <tr className="bg-slate-100 border-b-2 border-slate-900 font-bold uppercase text-[11px] text-slate-900">
-              <th className="p-2 border border-slate-400 w-[26%]">NOME CLIENTE</th>
+              <th className="p-2 border border-slate-400 w-[24%]">NOME CLIENTE</th>
               <th className="p-2 border border-slate-400 w-[14%]">CITTA'</th>
-              <th className="p-2 border border-slate-400 w-[24%]">INDIRIZZO</th>
-              <th className="p-2 border border-slate-400 text-right w-[9%]">R.I.</th>
-              <th className="p-2 border border-slate-400 text-right w-[9%]">ACQUISTI</th>
-              <th className="p-2 border border-slate-400 text-right w-[9%]">EMESSE</th>
-              <th className="p-2 border border-slate-400 text-right w-[9%]">R.F.</th>
+              <th className="p-2 border border-slate-400 w-[22%]">INDIRIZZO</th>
+              <th className="p-2 border border-slate-400 text-right w-[8%]">R.I.</th>
+              <th className="p-2 border border-slate-400 text-right w-[8%]">ACQUISTI</th>
+              <th className="p-2 border border-slate-400 text-right w-[8%]">EMESSE</th>
+              <th className="p-2 border border-slate-400 text-right w-[8%]">R.F.</th>
+              <th className="p-2 border border-slate-400 text-right w-[8%]">% UTILE</th>
             </tr>
           </thead>
           <tbody>
@@ -180,6 +205,9 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
                 <td className="p-2 border border-slate-300 text-right font-mono font-semibold text-slate-900">{formatAccountingCurrency(r.acquisti)}</td>
                 <td className="p-2 border border-slate-300 text-right font-mono font-semibold text-slate-900">{formatAccountingCurrency(r.emesse)}</td>
                 <td className="p-2 border border-slate-300 text-right font-mono font-semibold text-slate-900">{formatAccountingCurrency(r.rf)}</td>
+                <td className={`p-2 border border-slate-300 text-right font-mono font-bold ${r.isPositive ? 'text-emerald-700' : 'text-rose-700'}`}>
+                  {r.marginePercentuale}%
+                </td>
               </tr>
             ))}
 
@@ -198,18 +226,27 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
               </td>
               <td className="p-2 border border-slate-300 text-right font-mono text-slate-400">-</td>
               <td className="p-2 border border-slate-300 text-right font-mono text-slate-400">-</td>
+              <td className="p-2 border border-slate-300 text-center font-mono text-slate-400">-</td>
             </tr>
 
             {/* RIGA TOTALI: Riga in grassetto con bordo marcato riportante TOTALI e la somma di cantieri + sospesi */}
-            <tr className="border-t-2 border-b-2 border-slate-900 bg-slate-100 font-black text-xs text-slate-950">
-              <td className="p-2 border border-slate-400 text-right uppercase tracking-wider" colSpan={3}>
-                TOTALI
-              </td>
-              <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumRI)}</td>
-              <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(finalAcq)}</td>
-              <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumEmesse)}</td>
-              <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumRF)}</td>
-            </tr>
+            {(() => {
+              const artTotals = calculateArtigianoTotals(artigiano);
+              return (
+                <tr className="border-t-2 border-b-2 border-slate-900 bg-slate-100 font-black text-xs text-slate-950">
+                  <td className="p-2 border border-slate-400 text-right uppercase tracking-wider" colSpan={3}>
+                    TOTALI
+                  </td>
+                  <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumRI)}</td>
+                  <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(finalAcq)}</td>
+                  <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumEmesse)}</td>
+                  <td className="p-2 border border-slate-400 text-right font-mono">{formatAccountingCurrency(sumRF)}</td>
+                  <td className={`p-2 border border-slate-400 text-right font-mono font-black ${artTotals.marginePercentuale >= 0 ? 'text-emerald-800' : 'text-rose-800'}`}>
+                    {artTotals.marginePercentuale}%
+                  </td>
+                </tr>
+              );
+            })()}
           </tbody>
         </table>
 

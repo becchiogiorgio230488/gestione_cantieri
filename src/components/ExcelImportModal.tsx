@@ -270,7 +270,8 @@ export const ExcelImportModal: React.FC<ExcelImportModalProps> = ({
             protocol: item.protocol || undefined,
             client: item.client || undefined,
             status: 'in_attesa_cliente',
-            customerNote: 'Importato da Scheda Sospesi Excel',
+            customerNote: undefined,
+            internalNote: undefined,
             attachmentPdf: undefined,
             createdAt: new Date().toISOString(),
           })

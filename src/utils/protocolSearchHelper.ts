@@ -48,7 +48,9 @@ export function normalizeProtocol(raw?: string | null): string {
 
 /**
  * Checks if a movement or item protocol matches the search query.
- * Supports exact match, prefix match, and substring match.
+ * Matches exact protocol, normalized match, numeric equality (e.g. 7 matches 07, 7, PROT. 7),
+ * or discrete token/word boundary match.
+ * Strictly avoids substring matches like 7 matching 17, 27, 37, 70.
  */
 export function matchesProtocol(itemProtocol: string, query: string): boolean {
   if (!itemProtocol || !query) return false;
@@ -56,21 +58,35 @@ export function matchesProtocol(itemProtocol: string, query: string): boolean {
   const rawItem = itemProtocol.trim().toLowerCase();
   const rawQ = query.trim().toLowerCase();
 
-  // Direct case-insensitive match or inclusion
-  if (rawItem === rawQ || rawItem.includes(rawQ)) return true;
+  // 1. Direct exact match
+  if (rawItem === rawQ) return true;
 
   const normItem = normalizeProtocol(itemProtocol);
   const normQ = normalizeProtocol(query);
 
   if (!normItem || !normQ) return false;
 
-  // Normalized exact or substring match
-  if (normItem === normQ || normItem.includes(normQ)) return true;
+  // 2. Normalized exact match
+  if (normItem === normQ) return true;
 
-  // Handle numbers with or without leading zeros (e.g., "0014" vs "14")
-  const numItem = parseInt(normItem, 10);
-  const numQ = parseInt(normQ, 10);
-  if (!isNaN(numItem) && !isNaN(numQ) && numItem === numQ) {
+  // 3. Numeric exact match (e.g. "07" or "007" matches "7", but "17", "27", "70" do NOT)
+  const isQueryNumeric = /^\d+$/.test(normQ);
+  if (isQueryNumeric) {
+    const numQ = parseInt(normQ, 10);
+    // If the item itself is purely numeric after normalization
+    if (/^\d+$/.test(normItem)) {
+      const numItem = parseInt(normItem, 10);
+      return numItem === numQ;
+    }
+  }
+
+  // 4. Word / token boundary match (e.g. "PROT-7" or "7/2026" or "FATT. 7" contains token "7")
+  // Escape regex special chars in normQ
+  const escapedNormQ = normQ.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Match as distinct token delimited by non-alphanumeric characters or start/end of string
+  const tokenRegex = new RegExp(`(^|[^0-9a-zA-Z])${escapedNormQ}($|[^0-9a-zA-Z])`, 'i');
+
+  if (tokenRegex.test(rawItem) || tokenRegex.test(normItem)) {
     return true;
   }
 

@@ -239,7 +239,11 @@ async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true, host: '0.0.0.0' },
+      server: {
+        middlewareMode: true,
+        host: '0.0.0.0',
+        hmr: process.env.DISABLE_HMR === 'true' ? false : undefined,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -251,8 +255,29 @@ async function startServer() {
     });
   }
 
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log(`Server avviato su http://0.0.0.0:${port}`);
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`Port ${port} already in use, waiting 1s before retrying...`);
+      setTimeout(() => {
+        try {
+          server.close();
+        } catch {}
+        server.listen(port);
+      }, 1000);
+    } else {
+      console.error('Server listen error:', err);
+    }
+  });
+
+  process.on('SIGTERM', () => {
+    try { server.close(); } catch {}
+  });
+  process.on('SIGINT', () => {
+    try { server.close(); } catch {}
   });
 }
 

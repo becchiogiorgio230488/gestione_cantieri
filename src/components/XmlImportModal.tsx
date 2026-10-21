@@ -1076,9 +1076,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
           amount: signedInvoiceImponibile,
           protocol: manualProt || `FORN-XML-${invoiceNum}`,
           status: 'in_attesa_cliente',
-          customerNote: isNotaDiCredito
-            ? 'Nota di credito da verificare a quale cantiere imputare.'
-            : 'Da verificare a quale cantiere imputare l\'intera fornitura.',
+          customerNote: undefined,
+          internalNote: undefined,
           sourceFileName: parsedInvoice.fileName,
           attachmentPdf: attachedPdf || undefined,
         });
@@ -1160,9 +1159,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             ddtDate: ddt.dataDDT,
             protocol: manualProt || customDdtName,
             status: 'in_attesa_cliente',
-            customerNote: isNotaDiCredito
-              ? 'Nota di credito / DDT da stornare in attesa di chiarimento.'
-              : 'DDT in attesa di destinazione da parte del committente/capocantiere.',
+            customerNote: undefined,
+            internalNote: undefined,
             sourceFileName: parsedInvoice.fileName,
             attachmentPdf: attachedPdf || undefined,
           });
@@ -1183,9 +1181,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                 ddtDate: ddt.dataDDT,
                 protocol: manualProt || customDdtName,
                 status: 'in_attesa_cliente',
-                customerNote: isNotaDiCredito
-                  ? `Nota di credito: quota ${sp.percentage}% da stornare.`
-                  : `Quota ${sp.percentage}% da definire col cliente.`,
+                customerNote: undefined,
+                internalNote: undefined,
                 sourceFileName: parsedInvoice.fileName,
                 attachmentPdf: attachedPdf || undefined,
               });
@@ -1245,7 +1242,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
               amount: sign * expAmount,
               protocol: manualProt || `SPESE-${invoiceNum}`,
               status: 'in_attesa_cliente',
-              customerNote: 'Spese accessorie / oneri slegati da DDT da chiarire col cliente.',
+              customerNote: undefined,
+              internalNote: undefined,
               sourceFileName: parsedInvoice.fileName,
               attachmentPdf: attachedPdf || undefined,
             });
@@ -1261,7 +1259,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                   amount: sign * sp.amount,
                   protocol: manualProt || `SPESE-${invoiceNum}`,
                   status: 'in_attesa_cliente',
-                  customerNote: `Spese accessorie quota ${sp.percentage}% in sospeso.`,
+                  customerNote: undefined,
+                  internalNote: undefined,
                   sourceFileName: parsedInvoice.fileName,
                   attachmentPdf: attachedPdf || undefined,
                 });
@@ -1373,9 +1372,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
             ddtDate: line.ddtData,
             protocol: manualProt || `RIGA-${line.numeroLinea}`,
             status: 'in_attesa_cliente',
-            customerNote: isNotaDiCredito
-              ? 'Nota di credito / storno articolo da chiarire col cliente.'
-              : 'Articolo non attribuito da chiarire con il cliente.',
+            customerNote: undefined,
+            internalNote: undefined,
             sourceFileName: parsedInvoice.fileName,
             attachmentPdf: attachedPdf || undefined,
           });
@@ -1395,9 +1393,8 @@ export const XmlImportModal: React.FC<XmlImportModalProps> = ({
                 ddtDate: line.ddtData,
                 protocol: manualProt || `RIGA-${line.numeroLinea}`,
                 status: 'in_attesa_cliente',
-                customerNote: isNotaDiCredito
-                  ? `Nota di credito: quota riga ${line.numeroLinea} (${sp.percentage}%) da stornare.`
-                  : `Quota riga ${line.numeroLinea} (${sp.percentage}%) da attribuire.`,
+                customerNote: undefined,
+                internalNote: undefined,
                 sourceFileName: parsedInvoice.fileName,
                 attachmentPdf: attachedPdf || undefined,
               });

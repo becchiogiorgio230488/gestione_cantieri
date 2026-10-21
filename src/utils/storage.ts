@@ -43,7 +43,8 @@ export const INITIAL_ARTIGIANI: Artigiano[] = [
         ddtNumber: 'DDT-441/26',
         ddtDate: '2026-02-08',
         status: 'in_attesa_cliente',
-        customerNote: 'Da verificare con committente se installati su Villa De Luca o Uffici Tech.',
+        customerNote: undefined,
+        internalNote: undefined,
         createdAt: '2026-02-10T10:00:00.000Z',
       },
       {
@@ -57,7 +58,8 @@ export const INITIAL_ARTIGIANI: Artigiano[] = [
         ddtNumber: 'DDT-902/26',
         ddtDate: '2026-02-12',
         status: 'in_attesa_cliente',
-        customerNote: 'Materiale consumo officina/cantiere in attesa di imputazione.',
+        customerNote: undefined,
+        internalNote: undefined,
         createdAt: '2026-02-14T11:30:00.000Z',
       },
     ],
@@ -226,7 +228,8 @@ export const INITIAL_ARTIGIANI: Artigiano[] = [
         ddtNumber: 'DDT-108/26',
         ddtDate: '2026-02-15',
         status: 'in_attesa_cliente',
-        customerNote: 'In attesa conferma dal committente per imputazione a Residenza Bianchi.',
+        customerNote: undefined,
+        internalNote: undefined,
         createdAt: '2026-02-16T11:30:00.000Z',
       },
     ],
@@ -368,7 +371,8 @@ export const INITIAL_ARTIGIANI: Artigiano[] = [
         ddtNumber: 'DDT-90/26',
         ddtDate: '2026-02-09',
         status: 'in_attesa_cliente',
-        customerNote: 'Da attribuire al cantiere Condominio Aurora o Villa Rossi.',
+        customerNote: undefined,
+        internalNote: undefined,
         createdAt: '2026-02-11T09:00:00.000Z',
       },
     ],
@@ -430,10 +434,47 @@ export const INITIAL_ARTIGIANI: Artigiano[] = [
   },
 ];
 
+function cleanAutomatedNote(note?: string): string | undefined {
+  if (!note) return undefined;
+  const trimmed = note.trim();
+  const automatedPrefixes = [
+    'da verificare',
+    'spostato da cantiere',
+    'ddt in attesa',
+    'materiale consumo',
+    'in attesa conferma',
+    'importato da scheda sospesi',
+    'spese accessorie',
+    'nota di credito',
+    'articolo non attribuito',
+    'quota riga',
+  ];
+  const lower = trimmed.toLowerCase();
+  for (const pref of automatedPrefixes) {
+    if (lower.startsWith(pref)) return undefined;
+  }
+  return trimmed;
+}
+
+function cleanDdtFromDescription(item: SospesoItem): string | undefined {
+  if (item.ddtNumber && item.ddtNumber.trim()) return item.ddtNumber.trim();
+  if (!item.description) return undefined;
+  if (/^MANCA\s+DDT\s*$/i.test(item.description.trim())) return undefined;
+  const desc = item.description.replace(/^MANCA\s+DESTINAZIONE\s*:?\s*/i, '').trim();
+  if (!desc || desc.toLowerCase() === 'manca destinazione') return undefined;
+  return desc;
+}
+
 // Artigiani Storage
 function normalizeArtigianiData(list: Artigiano[]): Artigiano[] {
   return list.map((art) => ({
     ...art,
+    sospesi: (art.sospesi || []).map((s) => ({
+      ...s,
+      ddtNumber: cleanDdtFromDescription(s),
+      customerNote: cleanAutomatedNote(s.customerNote),
+      internalNote: cleanAutomatedNote(s.internalNote),
+    })),
     cantieri: (art.cantieri || []).map((c) => {
       const upperName = (c.name || '').toUpperCase().trim();
       const upperCity = (c.city || '').toUpperCase().trim();

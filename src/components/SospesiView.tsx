@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   Clock,
   ArrowRight,
@@ -11,8 +11,6 @@ import {
   AlertCircle,
   Building,
   Calendar,
-  Send,
-  HelpCircle,
   FileText,
   Save,
   X,
@@ -20,14 +18,16 @@ import {
   CheckSquare,
   Square,
   Lock,
-  EyeOff,
   Paperclip,
+  ArrowRightLeft,
+  AlertTriangle,
+  RotateCcw,
 } from 'lucide-react';
-import { Cantiere, SospesoItem, Movement, AttachmentPdf } from '../types';
+import { Cantiere, SospesoItem, AttachmentPdf } from '../types';
 import { formatCurrency, formatDateItalian, getTodayISODate } from '../utils/calculations';
 import { exportSospesiExcel } from '../utils/excelExport';
-import { ConfirmModal } from './ConfirmModal';
 import { CantiereSearchSelect, formatCantiereLabel } from './CantiereSearchSelect';
+import { CantiereModal } from './CantiereModal';
 import { openOrDownloadPdf } from '../utils/pdfStorage';
 import { PdfAttachmentModal } from './PdfAttachmentModal';
 
@@ -46,6 +46,7 @@ interface SospesiViewProps {
   onAddManualSospeso: (item: Omit<SospesoItem, 'id' | 'createdAt'>) => void;
   onOpenExcelImport?: () => void;
   onPrintReport: () => void;
+  onCreateNewCantiereDirectly?: (cantiereData: Partial<Cantiere>) => Cantiere;
 }
 
 export const SospesiView: React.FC<SospesiViewProps> = ({
@@ -63,9 +64,67 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
   onAddManualSospeso,
   onOpenExcelImport,
   onPrintReport,
+  onCreateNewCantiereDirectly,
 }) => {
+  // Search filter
   const [searchTerm, setSearchTerm] = useState('');
+
+  // PDF attachment modal
   const [managingPdfSospeso, setManagingPdfSospeso] = useState<SospesoItem | null>(null);
+
+  // Additional cantieri created on-the-fly during this session
+  const [localExtraCantieri, setLocalExtraCantieri] = useState<Cantiere[]>([]);
+
+  // Merged cantieri list
+  const allCantieri: Cantiere[] = useMemo(() => {
+    const map = new Map<string, Cantiere>();
+    cantieri.forEach((c) => map.set(c.id, c));
+    localExtraCantieri.forEach((c) => map.set(c.id, c));
+    return Array.from(map.values());
+  }, [cantieri, localExtraCantieri]);
+
+  // Modal to create new cantiere on the fly
+  const [isCreatingNewCantiere, setIsCreatingNewCantiere] = useState(false);
+  const [createCantiereContext, setCreateCantiereContext] = useState<'single_action' | 'bulk' | null>(null);
+
+  const handleSaveNewCantiere = (cantiereData: Partial<Cantiere>) => {
+    let newC: Cantiere;
+    if (onCreateNewCantiereDirectly) {
+      newC = onCreateNewCantiereDirectly(cantiereData);
+    } else {
+      const upperName = (cantiereData.name || 'NUOVO CANTIERE').trim().toUpperCase();
+      const upperCity = (cantiereData.city || cantieri[0]?.city || 'MILANO').trim().toUpperCase();
+      const upperAddress = cantiereData.address?.trim() ? cantiereData.address.trim().toUpperCase() : '';
+      newC = {
+        id: `cantiere-${Date.now()}`,
+        name: upperName,
+        city: upperCity,
+        address: upperAddress || '',
+        date: cantiereData.date || new Date().toISOString().slice(0, 10),
+        year: cantiereData.year || 2026,
+        client: upperName,
+        initialInventory: cantiereData.initialInventory || 0,
+        finalInventory: cantiereData.finalInventory || 0,
+        category: cantiereData.category || 'idraulico',
+        status: cantiereData.status || 'attivo',
+        notes: cantiereData.notes || '',
+        movements: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    setLocalExtraCantieri((prev) => [...prev, newC]);
+
+    if (createCantiereContext === 'single_action') {
+      setActionTargetCantiereId(newC.id);
+    } else if (createCantiereContext === 'bulk') {
+      setBulkTargetCantiereId(newC.id);
+    }
+
+    setIsCreatingNewCantiere(false);
+    setCreateCantiereContext(null);
+  };
 
   const handleSavePdf = (newPdf: AttachmentPdf | null) => {
     if (!managingPdfSospeso) return;
@@ -79,65 +138,198 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
     }
     setManagingPdfSospeso(null);
   };
-  const [selectedTargetByItem, setSelectedTargetByItem] = useState<Record<string, string>>({});
-  const [sospesoToDelete, setSospesoToDelete] = useState<SospesoItem | null>(null);
-  const [isConfirmDeleteSelectedOpen, setIsConfirmDeleteSelectedOpen] = useState(false);
-  const [isConfirmClearAllOpen, setIsConfirmClearAllOpen] = useState(false);
+
+  // Multi-selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkTargetCantiereId, setBulkTargetCantiereId] = useState<string>('');
-  const [manualError, setManualError] = useState<string | null>(null);
+  const [bulkAssignConfirmTarget, setBulkAssignConfirmTarget] = useState<{
+    items: SospesoItem[];
+    cantiere: Cantiere;
+  } | null>(null);
+  const [isConfirmDeleteSelectedOpen, setIsConfirmDeleteSelectedOpen] = useState(false);
 
-  // Adding manual sospeso
-  const [isAdding, setIsAdding] = useState(false);
-  const [manualDate, setManualDate] = useState(getTodayISODate());
-  const [manualDoc, setManualDoc] = useState('');
-  const [manualSupplier, setManualSupplier] = useState('');
-  const [manualClient, setManualClient] = useState('');
-  const [manualProtocol, setManualProtocol] = useState('');
-  const [manualDesc, setManualDesc] = useState('');
-  const [manualAmount, setManualAmount] = useState('');
-  const [manualNote, setManualNote] = useState('');
-  const [manualInternalNote, setManualInternalNote] = useState('');
+  // -------------------------------------------------------------
+  // TRASH ACTION MODAL (Dual choice: Sposta in Cantiere OR Elimina definitivamente)
+  // -------------------------------------------------------------
+  const [actionItem, setActionItem] = useState<SospesoItem | null>(null);
+  const [actionStep, setActionStep] = useState<'choose_action' | 'confirm_move' | 'confirm_delete'>('choose_action');
+  const [actionTargetCantiereId, setActionTargetCantiereId] = useState<string>('');
 
-  // Editing customer note
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editNote, setEditNote] = useState('');
+  const handleOpenActionModal = (item: SospesoItem) => {
+    setActionItem(item);
+    setActionStep('choose_action');
+    // Pre-select first available cantiere if none selected yet
+    if (allCantieri.length > 0) {
+      setActionTargetCantiereId(allCantieri[0].id);
+    } else {
+      setActionTargetCantiereId('');
+    }
+  };
 
-  const [editingInternalNoteId, setEditingInternalNoteId] = useState<string | null>(null);
-  const [editInternalNote, setEditInternalNote] = useState('');
+  const handleConfirmActionMove = () => {
+    if (!actionItem || !actionTargetCantiereId) return;
+    const targetC = allCantieri.find((c) => c.id === actionTargetCantiereId);
+    if (!targetC) return;
 
-  // Cantieri in ordine di CITTA - VIA (CLIENTE)
-  const sortedCantieri = React.useMemo(() => {
-    return [...cantieri].sort((a, b) => {
-      const cityA = (a.city || '').trim().toLowerCase();
-      const cityB = (b.city || '').trim().toLowerCase();
-      const cityCmp = cityA.localeCompare(cityB, 'it');
-      if (cityCmp !== 0) return cityCmp;
-      const addrA = (a.address || '').trim().toLowerCase();
-      const addrB = (b.address || '').trim().toLowerCase();
-      return addrA.localeCompare(addrB, 'it');
+    onAssignToCantiere(actionItem.id, targetC.id);
+    setSelectedIds((prev) => prev.filter((id) => id !== actionItem.id));
+    setActionItem(null);
+    setActionStep('choose_action');
+  };
+
+  const handleConfirmActionDelete = () => {
+    if (!actionItem) return;
+    onDeleteSospeso(actionItem.id);
+    setSelectedIds((prev) => prev.filter((id) => id !== actionItem.id));
+    setActionItem(null);
+    setActionStep('choose_action');
+  };
+
+  // -------------------------------------------------------------
+  // INLINE EDITING OF ROW (Fornitore, DDT, Importo, Data, Doc, Protocollo)
+  // -------------------------------------------------------------
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [editRowData, setEditRowData] = useState<{
+    date: string;
+    docNumber: string;
+    supplier: string;
+    ddtNumber: string;
+    protocol: string;
+    amount: number;
+    notes: string;
+  } | null>(null);
+
+  const handleStartEditRow = (s: SospesoItem) => {
+    setEditingRowId(s.id);
+    setEditRowData({
+      date: s.date,
+      docNumber: s.docNumber,
+      supplier: s.supplier,
+      ddtNumber: s.ddtNumber || '',
+      protocol: s.protocol || '',
+      amount: s.amount,
+      notes: s.internalNote || s.customerNote || '',
     });
-  }, [cantieri]);
+  };
 
-  const totSospesi = sospesi.reduce((acc, s) => acc + (Number(s.amount) || 0), 0);
+  const handleSaveEditRow = () => {
+    if (!editingRowId || !editRowData) return;
+    const current = sospesi.find((s) => s.id === editingRowId);
+    if (!current) return;
 
-  const filteredSospesi = sospesi.filter((s) => {
-    if (!searchTerm) return true;
-    const q = searchTerm.toLowerCase();
-    return (
-      s.docNumber.toLowerCase().includes(q) ||
-      s.supplier.toLowerCase().includes(q) ||
-      s.description.toLowerCase().includes(q) ||
-      (s.client && s.client.toLowerCase().includes(q)) ||
-      (s.protocol && s.protocol.toLowerCase().includes(q)) ||
-      (s.internalNote && s.internalNote.toLowerCase().includes(q)) ||
-      (s.customerNote && s.customerNote.toLowerCase().includes(q))
-    );
+    const updated: SospesoItem = {
+      ...current,
+      date: editRowData.date,
+      docNumber: editRowData.docNumber.trim(),
+      supplier: editRowData.supplier.trim().toUpperCase(),
+      ddtNumber: editRowData.ddtNumber.trim() || undefined,
+      protocol: editRowData.protocol.trim() || undefined,
+      amount: Math.round(Number(editRowData.amount) * 100) / 100 || 0,
+      internalNote: editRowData.notes.trim() || undefined,
+      customerNote: undefined,
+    };
+
+    onUpdateSospeso(updated);
+    setEditingRowId(null);
+    setEditRowData(null);
+  };
+
+  // -------------------------------------------------------------
+  // QUICK ROW NOTE EDITING
+  // -------------------------------------------------------------
+  const [editingRowNoteId, setEditingRowNoteId] = useState<string | null>(null);
+  const [editingRowNoteText, setEditingRowNoteText] = useState<string>('');
+
+  const handleSaveRowNote = (s: SospesoItem) => {
+    const text = editingRowNoteText.trim() || undefined;
+    onUpdateSospeso({
+      ...s,
+      internalNote: text,
+      customerNote: undefined,
+    });
+    setEditingRowNoteId(null);
+  };
+
+  // -------------------------------------------------------------
+  // ADD MANUAL MOVEMENT FORM
+  // -------------------------------------------------------------
+  const [isAddingMovement, setIsAddingMovement] = useState(false);
+  const [newMovement, setNewMovement] = useState<{
+    date: string;
+    docNumber: string;
+    supplier: string;
+    ddtNumber: string;
+    protocol: string;
+    amount: number;
+    notes: string;
+  }>({
+    date: getTodayISODate(),
+    docNumber: '',
+    supplier: '',
+    ddtNumber: '',
+    protocol: '',
+    amount: 0,
+    notes: '',
   });
 
-  // Calculate selected total
-  const selectedItems = sospesi.filter((s) => selectedIds.includes(s.id));
-  const selectedAmount = selectedItems.reduce((acc, s) => acc + (Number(s.amount) || 0), 0);
+  const handleSaveNewMovement = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMovement.docNumber.trim() || !newMovement.supplier.trim()) return;
+
+    onAddManualSospeso({
+      date: newMovement.date,
+      docNumber: newMovement.docNumber.trim(),
+      supplier: newMovement.supplier.trim().toUpperCase(),
+      protocol: newMovement.protocol.trim() || undefined,
+      ddtNumber: newMovement.ddtNumber.trim() || undefined,
+      description: newMovement.ddtNumber ? `DDT ${newMovement.ddtNumber}` : 'Materiale sospeso',
+      amount: Math.round(Number(newMovement.amount) * 100) / 100 || 0,
+      status: 'in_attesa_cliente',
+      internalNote: newMovement.notes.trim() || undefined,
+      customerNote: undefined,
+    });
+
+    setIsAddingMovement(false);
+    setNewMovement({
+      date: getTodayISODate(),
+      docNumber: '',
+      supplier: '',
+      ddtNumber: '',
+      protocol: '',
+      amount: 0,
+      notes: '',
+    });
+  };
+
+  // -------------------------------------------------------------
+  // FILTERING & TOTALS
+  // -------------------------------------------------------------
+  const filteredSospesi = useMemo(() => {
+    if (!searchTerm.trim()) return sospesi;
+    const q = searchTerm.toLowerCase();
+    return sospesi.filter((s) => {
+      return (
+        s.docNumber.toLowerCase().includes(q) ||
+        s.supplier.toLowerCase().includes(q) ||
+        (s.ddtNumber && s.ddtNumber.toLowerCase().includes(q)) ||
+        (s.protocol && s.protocol.toLowerCase().includes(q)) ||
+        (s.description && s.description.toLowerCase().includes(q)) ||
+        (s.internalNote && s.internalNote.toLowerCase().includes(q))
+      );
+    });
+  }, [sospesi, searchTerm]);
+
+  const totSospesi = useMemo(() => {
+    return sospesi.reduce((acc, s) => acc + (Number(s.amount) || 0), 0);
+  }, [sospesi]);
+
+  const selectedItems = useMemo(() => {
+    return sospesi.filter((s) => selectedIds.includes(s.id));
+  }, [sospesi, selectedIds]);
+
+  const selectedAmount = useMemo(() => {
+    return selectedItems.reduce((acc, s) => acc + (Number(s.amount) || 0), 0);
+  }, [selectedItems]);
 
   const isAllFilteredSelected =
     filteredSospesi.length > 0 &&
@@ -145,11 +337,9 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
 
   const handleToggleSelectAll = () => {
     if (isAllFilteredSelected) {
-      // Unselect filtered items
       const filteredIdSet = new Set(filteredSospesi.map((s) => s.id));
       setSelectedIds(selectedIds.filter((id) => !filteredIdSet.has(id)));
     } else {
-      // Add all filtered items to selection
       const newSet = new Set([...selectedIds, ...filteredSospesi.map((s) => s.id)]);
       setSelectedIds(Array.from(newSet));
     }
@@ -163,16 +353,30 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
     }
   };
 
-  const handleDeselectAll = () => {
-    setSelectedIds([]);
+  // Bulk actions handlers
+  const handleAssignBulk = () => {
+    const targetId = bulkTargetCantiereId;
+    if (!targetId || selectedIds.length === 0) return;
+    const targetC = allCantieri.find((c) => c.id === targetId);
+    if (!targetC) return;
+    setBulkAssignConfirmTarget({ items: selectedItems, cantiere: targetC });
   };
 
-  const handleConfirmDeleteSingle = () => {
-    if (sospesoToDelete) {
-      onDeleteSospeso(sospesoToDelete.id);
-      setSelectedIds((prev) => prev.filter((id) => id !== sospesoToDelete.id));
-      setSospesoToDelete(null);
+  const handleConfirmBulkAssign = () => {
+    if (!bulkAssignConfirmTarget) return;
+    const { items, cantiere } = bulkAssignConfirmTarget;
+    const ids = items.map((i) => i.id);
+
+    if (onAssignMultipleToCantiere) {
+      onAssignMultipleToCantiere(ids, cantiere.id);
+    } else {
+      for (const id of ids) {
+        onAssignToCantiere(id, cantiere.id);
+      }
     }
+    setSelectedIds([]);
+    setBulkAssignConfirmTarget(null);
+    setBulkTargetCantiereId('');
   };
 
   const handleConfirmDeleteSelected = () => {
@@ -186,102 +390,8 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
     setIsConfirmDeleteSelectedOpen(false);
   };
 
-  const handleConfirmClearAll = () => {
-    if (onClearAllSospesi) {
-      onClearAllSospesi();
-    } else if (onDeleteMultipleSospesi) {
-      onDeleteMultipleSospesi(sospesi.map((s) => s.id));
-    } else {
-      sospesi.forEach((s) => onDeleteSospeso(s.id));
-    }
-    setSelectedIds([]);
-    setIsConfirmClearAllOpen(false);
-  };
-
-  const handleAssignBulk = () => {
-    const targetId = bulkTargetCantiereId || cantieri[0]?.id;
-    if (!targetId || selectedIds.length === 0) return;
-
-    if (onAssignMultipleToCantiere) {
-      onAssignMultipleToCantiere(selectedIds, targetId);
-    } else {
-      for (const id of selectedIds) {
-        onAssignToCantiere(id, targetId);
-      }
-    }
-    setSelectedIds([]);
-  };
-
-  const handleCreateManual = (e: React.FormEvent) => {
-    e.preventDefault();
-    const amountNum = parseFloat(manualAmount.replace(',', '.')) || 0;
-    if (amountNum <= 0 || !manualDoc || !manualSupplier) {
-      setManualError('Inserisci N° Documento, Fornitore e un Importo valido.');
-      return;
-    }
-    setManualError(null);
-
-    onAddManualSospeso({
-      date: manualDate,
-      docNumber: manualDoc.trim(),
-      supplier: manualSupplier.toUpperCase().trim(),
-      client: manualClient.trim() || undefined,
-      protocol: manualProtocol.trim() || undefined,
-      description: manualDesc || 'Materiale da attribuire al cantiere',
-      amount: amountNum,
-      status: 'in_attesa_cliente',
-      customerNote: manualNote.trim() || undefined,
-      internalNote: manualInternalNote.trim() || undefined,
-    });
-
-    setIsAdding(false);
-    setManualDoc('');
-    setManualSupplier('');
-    setManualClient('');
-    setManualProtocol('');
-    setManualDesc('');
-    setManualAmount('');
-    setManualNote('');
-    setManualInternalNote('');
-  };
-
-  const handleStartEdit = (s: SospesoItem) => {
-    setEditingId(s.id);
-    setEditNote(s.customerNote || '');
-  };
-
-  const handleSaveEdit = (s: SospesoItem) => {
-    onUpdateSospeso({
-      ...s,
-      customerNote: editNote.trim() || undefined,
-    });
-    setEditingId(null);
-  };
-
-  const handleStartEditInternalNote = (s: SospesoItem) => {
-    setEditingInternalNoteId(s.id);
-    setEditInternalNote(s.internalNote || '');
-  };
-
-  const handleSaveEditInternalNote = (s: SospesoItem) => {
-    onUpdateSospeso({
-      ...s,
-      internalNote: editInternalNote.trim() || undefined,
-    });
-    setEditingInternalNoteId(null);
-  };
-
-  const handleExecuteAssign = (sospesoId: string) => {
-    const targetCantiereId = selectedTargetByItem[sospesoId] || cantieri[0]?.id;
-    if (!targetCantiereId) {
-      return;
-    }
-    setSelectedIds((prev) => prev.filter((id) => id !== sospesoId));
-    onAssignToCantiere(sospesoId, targetCantiereId);
-  };
-
   return (
-    <div className="space-y-6 pb-16">
+    <div className="space-y-5 pb-16">
       {/* Breadcrumb Navigation */}
       {onBack && (
         <div className="flex items-center justify-between text-xs text-slate-400">
@@ -293,12 +403,12 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
             <span>← Torna al Prospetto Generale {artigianoName ? `(${artigianoName})` : ''}</span>
           </button>
           <span className="font-mono text-[11px] text-slate-400">
-            SCHEDA SOSPESI • DDT E RIGHE DA ATTRIBUIRE
+            SCHEDA SOSPESI • REGISTRO MOVIMENTI
           </span>
         </div>
       )}
 
-      {/* Top Banner / Header Actions */}
+      {/* Top Banner / Summary Header */}
       <div className="bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-900 border-2 border-amber-500/30 rounded-2xl p-5 shadow-lg">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
@@ -306,23 +416,23 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
               <Clock className="h-6 w-6" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="text-lg font-black text-white tracking-tight uppercase">
-                  SCHEDA SOSPESI • DDT E RIGHE DA ATTRIBUIRE
+                  SCHEDA SOSPESI • REGISTRO MOVIMENTI
                 </h1>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                   {sospesi.length} in attesa
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-1 max-w-2xl">
-                Materiali e documenti di trasporto (DDT) estratti dalle fatture XML non ancora associati con certezza a un cantiere.
-                Puoi attribuirli, esportarli in Excel/PDF oppure cancellarli singolarmente o in blocco.
+                Documenti di costo e DDT non ancora assegnati a un cantiere.
+                Usa l'azione cestino su ciascuna riga per <strong>spostare nel cantiere desiderato</strong> oppure per <strong>eliminare definitivamente</strong> la voce.
               </p>
             </div>
           </div>
 
           <div className="flex flex-col sm:flex-row items-end sm:items-center gap-3">
-            <div className="text-right bg-slate-950/80 px-4 py-2.5 rounded-xl border border-slate-800">
+            <div className="text-right bg-slate-950/80 px-4 py-2 rounded-xl border border-slate-800">
               <span className="text-[11px] font-bold text-slate-400 uppercase block">Totale Sospeso</span>
               <span className="text-xl font-black font-mono text-amber-400">
                 {formatCurrency(totSospesi)}
@@ -331,195 +441,218 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
 
             <div className="flex flex-wrap items-center gap-2">
               <button
-                onClick={() => setIsAdding(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer"
-              >
-                <Plus className="h-4 w-4 text-slate-950" />
-                <span>+ Aggiungi Sospeso</span>
-              </button>
-
-              <button
+                type="button"
                 onClick={() => exportSospesiExcel(sospesi, artigianoName)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-emerald-400 border border-slate-700 rounded-lg text-xs font-semibold transition-all cursor-pointer"
-                title="Esporta foglio Excel della Scheda Sospesi"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow cursor-pointer"
+                title="Esporta la scheda sospesi in formato Excel (.xlsx)"
               >
                 <FileSpreadsheet className="h-4 w-4" />
-                <span>Excel (.xlsx)</span>
+                <span>Esporta Excel</span>
               </button>
-
-              {onOpenExcelImport && (
-                <button
-                  type="button"
-                  onClick={onOpenExcelImport}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-bold transition-all shadow-md cursor-pointer"
-                  title="Importa vecchie schede sospesi da file Excel (.xls / .xlsx)"
-                >
-                  <FileSpreadsheet className="h-4 w-4 text-teal-200" />
-                  <span>Importa da Excel</span>
-                </button>
-              )}
-
               <button
+                type="button"
                 onClick={onPrintReport}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold transition-all cursor-pointer"
-                title="Stampa report da sottoporre al cliente/capocantiere"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-all border border-slate-700 cursor-pointer"
+                title="Stampa la scheda sospesi o salva come PDF"
               >
                 <Printer className="h-4 w-4" />
-                <span>Report per Cliente (PDF)</span>
+                <span>Stampa / PDF</span>
               </button>
-
-              {/* Bottoni Cancellazione Tutti i Sospesi */}
-              {sospesi.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setIsConfirmClearAllOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-lg text-xs font-semibold transition-all cursor-pointer"
-                  title="Cancella tutte le voci registrate nei sospesi"
-                >
-                  <Trash2 className="h-4 w-4 text-rose-400" />
-                  <span>Svuota Sospesi</span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => setIsAddingMovement(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold transition-all shadow cursor-pointer"
+                title="Aggiungi una voce sospesa manualmente"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Nuova Voce</span>
+              </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Manual Add Form */}
-      {isAdding && (
+      {/* Bulk Action Toolbar when items are selected */}
+      {selectedIds.length > 0 && (
+        <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-amber-300">
+              {selectedIds.length} {selectedIds.length === 1 ? 'voce selezionata' : 'voci selezionate'}
+            </span>
+            <span className="text-slate-500">•</span>
+            <span className="text-slate-300">
+              Totale selezionato: <strong className="text-rose-300 font-mono">{formatCurrency(selectedAmount)}</strong>
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {allCantieri.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <div className="w-72 min-w-[220px]">
+                  <CantiereSearchSelect
+                    value={bulkTargetCantiereId}
+                    onChange={setBulkTargetCantiereId}
+                    cantieri={allCantieri}
+                    onCreateNew={() => {
+                      setCreateCantiereContext('bulk');
+                      setIsCreatingNewCantiere(true);
+                    }}
+                    showSospesiOption={false}
+                    showIgnoreOption={false}
+                    showUnassignedOption={true}
+                    unassignedLabel="Seleziona cantiere di destinazione..."
+                    placeholder="Cerca cantiere per nome o città..."
+                    size="sm"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAssignBulk}
+                  disabled={!bulkTargetCantiereId}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shadow-sm"
+                  title="Sposta tutte le voci selezionate nel cantiere scelto"
+                >
+                  <ArrowRightLeft className="h-3.5 w-3.5" />
+                  <span>Sposta Selezionati</span>
+                </button>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsConfirmDeleteSelectedOpen(true)}
+              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+              title="Cancella definitivamente tutte le voci selezionate"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Cancella Selezionati ({selectedIds.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedIds([])}
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-xs transition-colors cursor-pointer"
+              title="Deseleziona tutto"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Add Movement Inline Form (graphically identical to SchedaCantiereView) */}
+      {isAddingMovement && (
         <form
-          onSubmit={handleCreateManual}
+          onSubmit={handleSaveNewMovement}
           className="bg-slate-900 border border-amber-500/40 rounded-xl p-4 shadow-md space-y-3 animate-fadeIn"
         >
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-            <span className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
-              <Plus className="h-4 w-4" />
-              <span>Inserisci Nuova Voce o DDT da Chiarire nei Sospesi</span>
+            <span className="text-sm font-bold text-white flex items-center gap-2">
+              <Plus className="h-4 w-4 text-amber-400" />
+              <span>
+                Nuova Voce Sospesa: <strong className="text-rose-400">ACQUISTO / COSTO</strong>
+              </span>
             </span>
             <button
               type="button"
-              onClick={() => setIsAdding(false)}
-              className="text-slate-400 hover:text-white cursor-pointer"
+              onClick={() => setIsAddingMovement(false)}
+              className="text-slate-400 hover:text-slate-200 cursor-pointer"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
             <div>
               <label className="block text-slate-400 font-semibold mb-1">DATA DOC.</label>
               <input
                 type="date"
                 required
-                value={manualDate}
-                onChange={(e) => setManualDate(e.target.value)}
+                value={newMovement.date}
+                onChange={(e) => setNewMovement({ ...newMovement, date: e.target.value })}
                 className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400"
               />
             </div>
 
             <div>
-              <label className="block text-slate-400 font-semibold mb-1">N° DOCUMENTO / DDT *</label>
+              <label className="block text-slate-400 font-semibold mb-1">N° DOC.</label>
               <input
                 type="text"
                 required
-                placeholder="es. DDT 124/B"
-                value={manualDoc}
-                onChange={(e) => setManualDoc(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400 font-mono"
+                placeholder="es. FT-2026/012 o DDT 45"
+                value={newMovement.docNumber}
+                onChange={(e) => setNewMovement({ ...newMovement, docNumber: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white font-mono focus:outline-none focus:border-amber-400"
               />
             </div>
 
             <div>
-              <label className="block text-slate-400 font-semibold mb-1">FORNITORE *</label>
+              <label className="block text-slate-400 font-semibold mb-1">FORNITORE</label>
               <input
                 type="text"
                 required
-                placeholder="es. EDILIZIA S.P.A."
-                value={manualSupplier}
-                onChange={(e) => setManualSupplier(e.target.value)}
+                placeholder="es. SONEPAR SPA"
+                value={newMovement.supplier}
+                onChange={(e) => setNewMovement({ ...newMovement, supplier: e.target.value.toUpperCase() })}
+                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white uppercase focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-400 font-semibold mb-1">RIF. DDT (OPZIONALE)</label>
+              <input
+                type="text"
+                placeholder="es. DDT 45 del 12/01"
+                value={newMovement.ddtNumber}
+                onChange={(e) => setNewMovement({ ...newMovement, ddtNumber: e.target.value })}
                 className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400"
               />
             </div>
 
             <div>
-              <label className="block text-slate-400 font-semibold mb-1">IMPORTO (€) *</label>
+              <label className="block text-slate-400 font-semibold mb-1">N./PROT</label>
               <input
                 type="text"
+                placeholder="es. PROT-26-015"
+                value={newMovement.protocol}
+                onChange={(e) => setNewMovement({ ...newMovement, protocol: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white font-mono focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-400 font-semibold mb-1">IMPORTO ACQUISTI (€)</label>
+              <input
+                type="number"
+                step="0.01"
                 required
-                placeholder="es. 340,50"
-                value={manualAmount}
-                onChange={(e) => setManualAmount(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400 font-mono"
+                placeholder="0.00"
+                value={newMovement.amount || ''}
+                onChange={(e) =>
+                  setNewMovement({ ...newMovement, amount: parseFloat(e.target.value) || 0 })
+                }
+                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 font-mono text-rose-300 focus:outline-none focus:border-amber-400"
               />
             </div>
 
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">CLIENTE</label>
-              <input
-                type="text"
-                placeholder="es. Ditta Rossi / Committente"
-                value={manualClient}
-                onChange={(e) => setManualClient(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400"
-              />
-            </div>
-
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">N./PROT (PROTOCOLLO)</label>
-              <input
-                type="text"
-                placeholder="es. 142 o PROT-26/01"
-                value={manualProtocol}
-                onChange={(e) => setManualProtocol(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400 font-mono"
-              />
-            </div>
-
-            <div className="sm:col-span-2">
-              <label className="block text-slate-400 font-semibold mb-1">DESCRIZIONE MATERIALE / FORNITURA</label>
-              <input
-                type="text"
-                placeholder="es. Fornitura pannelli isolanti e collante"
-                value={manualDesc}
-                onChange={(e) => setManualDesc(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400"
-              />
-            </div>
-
-            <div className="sm:col-span-2">
-              <label className="block text-slate-400 font-semibold mb-1">NOTE PER IL CLIENTE (STAMPATA SUL REPORT)</label>
-              <input
-                type="text"
-                placeholder="es. Chiedere conferma a quale cantiere appartiene"
-                value={manualNote}
-                onChange={(e) => setManualNote(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400"
-              />
-            </div>
-
-            <div className="sm:col-span-4 bg-indigo-950/20 border border-indigo-500/30 p-2.5 rounded-lg">
-              <label className="block text-indigo-300 font-semibold mb-1 flex items-center gap-1.5">
-                <Lock className="h-3 w-3 text-indigo-400" />
-                <span>NOTA INTERNA (SOLO A VIDEO - Non verrà stampata né esportata in Excel)</span>
+            <div className="sm:col-span-2 lg:col-span-6">
+              <label className="block text-slate-400 font-semibold mb-1">
+                NOTE SULLA RIGA (OPZIONALE)
               </label>
               <input
                 type="text"
-                placeholder="es. Da chiedere a Marco De Luca se l'ordine era per il cantiere Villa..."
-                value={manualInternalNote}
-                onChange={(e) => setManualInternalNote(e.target.value)}
-                className="w-full bg-slate-950 border border-indigo-500/40 rounded px-2.5 py-1.5 text-indigo-100 placeholder-indigo-400/50 focus:outline-none focus:border-indigo-400"
+                placeholder="es. Da verificare con il committente..."
+                value={newMovement.notes}
+                onChange={(e) => setNewMovement({ ...newMovement, notes: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400 text-xs"
               />
             </div>
           </div>
 
-          {manualError && (
-            <p className="text-xs text-rose-400 font-semibold">{manualError}</p>
-          )}
-
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
-              onClick={() => setIsAdding(false)}
+              onClick={() => setIsAddingMovement(false)}
               className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded font-medium cursor-pointer"
             >
               Annulla
@@ -528,22 +661,33 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
               type="submit"
               className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs rounded font-bold transition-colors cursor-pointer"
             >
-              Inserisci nei Sospesi
+              Registra Movimento Sospeso
             </button>
           </div>
         </form>
       )}
 
-      {/* Sospesi Table */}
+      {/* ------------------------------------------------------------- */}
+      {/* THE MOVEMENTS GRID (Graphically identical to SchedaCantiereView) */}
+      {/* ------------------------------------------------------------- */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
-        {/* Search header & Selection counter */}
+        {/* Table Search & Count Header */}
         <div className="p-3 bg-slate-950 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-              Registro Materiali da Attribuire
+              Registro Movimenti Sospesi
             </span>
-            <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-              {filteredSospesi.length} voci trovate
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-800 text-slate-400">
+              {filteredSospesi.length} {filteredSospesi.length === 1 ? 'riga' : 'righe'}
+            </span>
+            <span className="text-slate-600 hidden sm:inline">•</span>
+            <span className="text-xs font-semibold text-slate-400 hidden sm:inline">
+              Totale costi:{' '}
+              <strong className="text-rose-400 font-mono font-bold">
+                {formatCurrency(
+                  filteredSospesi.reduce((acc, s) => acc + (Number(s.amount) || 0), 0)
+                )}
+              </strong>
             </span>
           </div>
 
@@ -551,111 +695,40 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
             <input
               type="text"
-              placeholder="Cerca per fornitore, n° doc, descrizione..."
+              placeholder="Filtra per n° doc, fornitore, ddt..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-8 pr-3 py-1 bg-slate-900 border border-slate-800 rounded text-xs text-slate-200 focus:outline-none focus:border-amber-400"
+              className="w-full pl-8 pr-2.5 py-1 bg-slate-900 border border-slate-800 rounded text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-400"
             />
           </div>
         </div>
 
-        {/* Bulk Action Toolbar when items are selected */}
-        {selectedIds.length > 0 && (
-          <div className="p-3 bg-amber-500/10 border-b border-amber-500/30 flex flex-wrap items-center justify-between gap-3 text-xs animate-fadeIn">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-amber-300">
-                {selectedIds.length} {selectedIds.length === 1 ? 'voce selezionata' : 'voci selezionate'}
-              </span>
-              <span className="text-slate-500">•</span>
-              <span className="text-slate-300">
-                Totale selezionato: <strong className="text-rose-300 font-mono">{formatCurrency(selectedAmount)}</strong>
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              {cantieri.length > 0 && (
-                <div className="flex items-center gap-1.5">
-                  <div className="w-64 min-w-[220px]">
-                    <CantiereSearchSelect
-                      value={bulkTargetCantiereId}
-                      onChange={setBulkTargetCantiereId}
-                      cantieri={cantieri}
-                      showSospesiOption={false}
-                      showIgnoreOption={false}
-                      placeholder="Cerca cantiere per nome o città..."
-                      size="sm"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleAssignBulk}
-                    disabled={!bulkTargetCantiereId}
-                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
-                    title="Sposta tutte le voci selezionate nel cantiere scelto"
-                  >
-                    <ArrowRight className="h-3.5 w-3.5" />
-                    <span>Sposta Selezionati</span>
-                  </button>
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={() => setIsConfirmDeleteSelectedOpen(true)}
-                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-                title="Cancella definitivamente tutte le voci selezionate"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                <span>Cancella Selezionati ({selectedIds.length})</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleDeselectAll}
-                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded text-xs transition-colors cursor-pointer"
-                title="Deseleziona tutto"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Table */}
+        {/* Movements Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs sm:text-sm">
             <thead>
-              <tr className="bg-slate-950 text-slate-400 border-b-2 border-slate-800 uppercase tracking-wider text-[11px] font-bold">
+              <tr className="bg-slate-950 text-slate-400 border-b-2 border-slate-800 uppercase tracking-wider text-[11px] font-extrabold">
                 <th className="py-3 px-3 w-10 text-center">
                   <input
                     type="checkbox"
                     checked={isAllFilteredSelected}
                     onChange={handleToggleSelectAll}
-                    className="rounded bg-slate-950 border-slate-700 text-amber-500 focus:ring-0 cursor-pointer w-4 h-4"
+                    className="rounded bg-slate-950 border-slate-700 text-amber-500 focus:ring-0 cursor-pointer w-3.5 h-3.5"
                     title="Seleziona / Deseleziona tutti"
                   />
                 </th>
-                <th className="py-3 px-2.5 w-24">DATA DOC.</th>
-                <th className="py-3 px-2.5 w-28">N° DOC.</th>
-                <th className="py-3 px-3 w-48">TIPO DOC. / FORNITORE</th>
-                <th className="py-3 px-3 w-32">CLIENTE</th>
-                <th className="py-3 px-2.5 w-24">N./PROT</th>
-                <th className="py-3 px-3 text-right w-24 text-rose-300">IMPORTO (€)</th>
-                <th className="py-3 px-3.5 w-64 text-indigo-300 bg-indigo-950/20">
-                  <div className="flex items-center gap-1.5">
-                    <Lock className="h-3 w-3 text-indigo-400" />
-                    <span>NOTA INTERNA (SOLO A VIDEO)</span>
-                  </div>
-                </th>
-                <th className="py-3 px-3.5 w-44">NOTE PER IL CLIENTE</th>
-                <th className="py-3 px-3 w-64 text-center text-amber-400">ATTRIBUISCI A CANTIERE</th>
-                <th className="py-3 px-2 text-right w-16">AZIONI</th>
+                <th className="py-3 px-3.5 w-28">DATA DOC.</th>
+                <th className="py-3 px-3.5 w-32">N° DOC.</th>
+                <th className="py-3 px-4">TIPO DOC. / FORNITORE / CLIENTE</th>
+                <th className="py-3 px-3 w-28">N./PROT</th>
+                <th className="py-3 px-4 text-right w-32 text-rose-400">ACQUISTI (€)</th>
+                <th className="py-3 px-3 text-right w-28">AZIONI</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800 text-slate-300">
               {filteredSospesi.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="py-12 text-center text-slate-500">
+                  <td colSpan={7} className="py-12 text-center text-slate-500">
                     <CheckCircle2 className="h-8 w-8 text-emerald-500/60 mx-auto mb-2" />
                     <p className="font-semibold text-slate-300">Nessuna voce sospesa!</p>
                     <p className="text-xs text-slate-500 mt-0.5">
@@ -665,11 +738,124 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                 </tr>
               ) : (
                 filteredSospesi.map((s) => {
-                  const isEditingCustomerNote = editingId === s.id;
-                  const isEditingInternalNote = editingInternalNoteId === s.id;
-                  const currentTarget = selectedTargetByItem[s.id] || cantieri[0]?.id || '';
+                  const isEditing = editingRowId === s.id;
                   const isSelected = selectedIds.includes(s.id);
+                  const rowNote = s.internalNote || s.customerNote;
 
+                  // ---------------------------------------------
+                  // INLINE EDIT MODE (when user clicks Edit2 icon)
+                  // ---------------------------------------------
+                  if (isEditing && editRowData) {
+                    return (
+                      <tr key={s.id} className="bg-slate-800/80">
+                        <td className="p-2 text-center">
+                          <span className="text-amber-400 text-xs font-bold">✎</span>
+                        </td>
+                        <td className="p-2">
+                          <input
+                            type="date"
+                            value={editRowData.date}
+                            onChange={(e) =>
+                              setEditRowData({ ...editRowData, date: e.target.value })
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs text-white"
+                          />
+                        </td>
+                        <td className="p-2">
+                          <input
+                            type="text"
+                            value={editRowData.docNumber}
+                            onChange={(e) =>
+                              setEditRowData({ ...editRowData, docNumber: e.target.value })
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs text-white"
+                          />
+                        </td>
+                        <td className="p-2 space-y-1">
+                          <input
+                            type="text"
+                            placeholder="Fornitore..."
+                            value={editRowData.supplier}
+                            onChange={(e) =>
+                              setEditRowData({
+                                ...editRowData,
+                                supplier: e.target.value.toUpperCase(),
+                              })
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs text-white font-semibold uppercase"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Rif. DDT (es. DDT 45 del 12/01)..."
+                            value={editRowData.ddtNumber}
+                            onChange={(e) =>
+                              setEditRowData({ ...editRowData, ddtNumber: e.target.value })
+                            }
+                            className="w-full bg-slate-950 border border-amber-400/50 rounded px-1.5 py-0.5 text-[11px] text-amber-200 placeholder-slate-500"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Note riga..."
+                            value={editRowData.notes}
+                            onChange={(e) =>
+                              setEditRowData({ ...editRowData, notes: e.target.value })
+                            }
+                            className="w-full bg-slate-950 border border-slate-700 rounded px-1.5 py-0.5 text-[11px] text-slate-300 placeholder-slate-500"
+                          />
+                        </td>
+                        <td className="p-2">
+                          <input
+                            type="text"
+                            placeholder="PROT..."
+                            value={editRowData.protocol}
+                            onChange={(e) =>
+                              setEditRowData({ ...editRowData, protocol: e.target.value })
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs text-white font-mono"
+                          />
+                        </td>
+                        <td className="p-2 text-right">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={editRowData.amount}
+                            onChange={(e) =>
+                              setEditRowData({
+                                ...editRowData,
+                                amount: parseFloat(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs text-right font-mono text-rose-300"
+                          />
+                        </td>
+                        <td className="p-2 text-right whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={handleSaveEditRow}
+                            className="p-1 text-emerald-400 hover:text-emerald-300 mr-1 cursor-pointer"
+                            title="Salva modifiche"
+                          >
+                            <Save className="h-4 w-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingRowId(null);
+                              setEditRowData(null);
+                            }}
+                            className="p-1 text-slate-400 hover:text-slate-300 cursor-pointer"
+                            title="Annulla"
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  // ---------------------------------------------
+                  // NORMAL DISPLAY ROW (Identical to SchedaCantiereView)
+                  // ---------------------------------------------
                   return (
                     <tr
                       key={s.id}
@@ -677,33 +863,38 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                         isSelected ? 'bg-amber-500/5' : ''
                       }`}
                     >
-                      {/* Checkbox per selezione multipla */}
+                      {/* Checkbox */}
                       <td className="py-3 px-3 text-center">
                         <input
                           type="checkbox"
                           checked={isSelected}
                           onChange={() => handleToggleSelect(s.id)}
-                          className="rounded bg-slate-950 border-slate-700 text-amber-500 focus:ring-0 cursor-pointer w-4 h-4"
+                          className="rounded bg-slate-950 border-slate-700 text-amber-500 focus:ring-0 cursor-pointer w-3.5 h-3.5"
                           title="Seleziona voce"
                         />
                       </td>
 
                       {/* DATA DOC. */}
-                      <td className="py-3 px-2.5 font-mono text-slate-300 text-xs whitespace-nowrap">
+                      <td className="py-3 px-3.5 whitespace-nowrap font-mono text-slate-300 text-xs">
                         {formatDateItalian(s.date)}
                       </td>
 
-                      {/* N° DOC. (Numero fattura) */}
-                      <td className="py-3 px-2.5 font-mono font-bold text-amber-300 whitespace-nowrap text-xs">
+                      {/* N° DOC. */}
+                      <td className="py-3 px-3.5 whitespace-nowrap font-medium text-white">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span>{s.docNumber}</span>
+                          {s.sourceFileName && (
+                            <span className="px-1 py-0.2 rounded text-[9px] uppercase font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                              XML
+                            </span>
+                          )}
                           {s.attachmentPdf ? (
                             <div className="inline-flex items-center gap-1">
                               <button
                                 type="button"
                                 onClick={() => openOrDownloadPdf(s.attachmentPdf!)}
                                 className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30 flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
-                                title={`Apri copia PDF fattura (${s.attachmentPdf.fileName})`}
+                                title={`Visualizza/scarica copia PDF fattura (${s.attachmentPdf.fileName})`}
                               >
                                 <FileText className="h-3 w-3 text-red-400" />
                                 <span>PDF</span>
@@ -722,7 +913,7 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                               type="button"
                               onClick={() => setManagingPdfSospeso(s)}
                               className="px-1.5 py-0.5 rounded text-[10px] font-semibold text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/80 flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
-                              title="Allega copia PDF della fattura a questa voce sospesa (si sincronizzerà su tutti i cantieri)"
+                              title="Allega copia PDF della fattura a questa voce"
                             >
                               <Paperclip className="h-3 w-3 text-slate-400 hover:text-red-400" />
                               <span>+ PDF</span>
@@ -731,197 +922,182 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
                         </div>
                       </td>
 
-                      {/* TIPO DOC. / FORNITORE */}
-                      <td className="py-3 px-3">
-                        <div className="font-bold text-white uppercase text-xs">
-                          {s.supplier}
+                      {/* TIPO DOC. / FORNITORE / CLIENTE */}
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-slate-100 uppercase tracking-wide">
+                            {s.supplier}
+                          </span>
+                          {s.ddtNumber && (
+                            <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-amber-300 text-[11px] font-mono font-bold tracking-tight">
+                              DDT {s.ddtNumber} {s.ddtDate ? `del ${s.ddtDate}` : ''}
+                            </span>
+                          )}
                         </div>
-                        {s.ddtNumber && (
-                          <div className="text-[11px] text-amber-400/90 font-mono mt-0.5">
-                            DDT: {s.ddtNumber} {s.ddtDate ? `(${formatDateItalian(s.ddtDate)})` : ''}
+
+                        {/* Note editing / display */}
+                        {editingRowNoteId === s.id ? (
+                          <div className="mt-1.5 flex items-center gap-1.5 animate-fadeIn">
+                            <input
+                              type="text"
+                              value={editingRowNoteText}
+                              onChange={(e) => setEditingRowNoteText(e.target.value)}
+                              placeholder="Scrivi nota per questa riga..."
+                              className="w-full bg-slate-950 border border-amber-400 rounded px-2 py-1 text-xs text-white focus:outline-none shadow-inner"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleSaveRowNote(s);
+                                } else if (e.key === 'Escape') {
+                                  setEditingRowNoteId(null);
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSaveRowNote(s)}
+                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-sm shrink-0"
+                              title="Salva nota"
+                            >
+                              <Save className="h-3 w-3" />
+                              <span>Salva</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingRowNoteId(null)}
+                              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs cursor-pointer transition-colors shrink-0"
+                              title="Annulla"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="mt-1 flex items-center gap-2 flex-wrap">
+                            {rowNote ? (
+                              <div
+                                onClick={() => {
+                                  setEditingRowNoteId(s.id);
+                                  setEditingRowNoteText(rowNote);
+                                }}
+                                className="group/note inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-800 text-amber-300/95 hover:text-amber-200 border border-slate-700/80 cursor-pointer text-xs transition-colors"
+                                title="Clicca per modificare la nota di questa riga"
+                              >
+                                <FileText className="h-3 w-3 text-amber-400 shrink-0" />
+                                <span className="font-sans font-medium">{rowNote}</span>
+                                <Edit2 className="h-2.5 w-2.5 text-slate-400 opacity-0 group-hover/note:opacity-100 transition-opacity ml-0.5" />
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingRowNoteId(s.id);
+                                  setEditingRowNoteText('');
+                                }}
+                                className="text-[11px] text-slate-500 hover:text-amber-400 flex items-center gap-1 cursor-pointer transition-colors"
+                                title="Aggiungi una nota a questa riga"
+                              >
+                                <Plus className="h-3 w-3" />
+                                <span>Aggiungi nota</span>
+                              </button>
+                            )}
                           </div>
                         )}
-                        <div className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">
-                          {s.description}
-                        </div>
                       </td>
 
-                      {/* CLIENTE */}
-                      <td className="py-3 px-3 text-slate-300 text-xs font-medium">
-                        {s.client || <span className="text-slate-600">-</span>}
-                      </td>
-
-                      {/* N./PROT (Protocollo contabile a mano) */}
-                      <td className="py-3 px-2.5 font-mono text-slate-300 text-xs font-semibold whitespace-nowrap">
-                        {s.protocol ? (
-                          <span className="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 text-slate-200">
-                            {s.protocol}
+                      {/* N./PROT */}
+                      <td className="py-3 px-3 font-mono text-xs">
+                        {s.protocol && s.protocol !== '-' ? (
+                          <span className="px-2 py-0.5 rounded bg-slate-800 text-amber-300 font-bold border border-slate-700/80 inline-block shadow-sm">
+                            #{s.protocol}
                           </span>
                         ) : (
                           <span className="text-slate-600">-</span>
                         )}
                       </td>
 
-                      {/* IMPORTO (€) */}
-                      <td className="py-3 px-3 text-right font-mono font-bold whitespace-nowrap text-xs">
-                        <span className={s.amount < 0 ? 'text-purple-300' : 'text-rose-300'}>
-                          {s.amount < 0 && (
-                            <span className="text-[10px] px-1 py-0.5 mr-1 rounded bg-purple-500/20 text-purple-300 font-sans font-bold border border-purple-500/30">
-                              N.C.
-                            </span>
-                          )}
-                          {formatCurrency(s.amount)}
-                        </span>
-                      </td>
-
-                      {/* NOTA INTERNA (SOLO A VIDEO - Non stampata né esportata in Excel) */}
-                      <td className="py-3 px-3.5 bg-indigo-950/10">
-                        {isEditingInternalNote ? (
-                          <div className="space-y-1.5 min-w-[220px]">
-                            <div className="flex items-center justify-between text-[10px] text-indigo-300 font-bold uppercase tracking-wider">
-                              <span className="flex items-center gap-1">
-                                <Lock className="h-3 w-3 text-indigo-400" />
-                                <span>Nota interna a video</span>
+                      {/* ACQUISTI (€) */}
+                      <td
+                        className={`py-3 px-4 text-right font-mono font-medium ${
+                          s.amount < 0 ? 'text-purple-300 font-bold' : 'text-rose-300'
+                        }`}
+                      >
+                        {s.amount !== 0 ? (
+                          <div className="flex items-center justify-end gap-1.5">
+                            {s.amount < 0 && (
+                              <span className="text-[10px] px-1 py-0.5 rounded bg-purple-500/20 text-purple-300 font-sans font-bold border border-purple-500/30">
+                                N.C.
                               </span>
-                              <span className="text-[9px] text-indigo-400/80 font-normal">
-                                Non stampata
-                              </span>
-                            </div>
-                            <textarea
-                              value={editInternalNote}
-                              onChange={(e) => setEditInternalNote(e.target.value)}
-                              rows={2}
-                              className="w-full bg-slate-950 border border-indigo-400/80 rounded p-1.5 text-xs text-white focus:outline-none shadow-inner"
-                              placeholder="Cose da chiedere al cliente per risolvere il sospeso..."
-                              autoFocus
-                            />
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleSaveEditInternalNote(s)}
-                                className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                                title="Salva nota interna"
-                              >
-                                <Save className="h-3 w-3" />
-                                <span>Salva</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingInternalNoteId(null)}
-                                className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs cursor-pointer transition-colors"
-                                title="Annulla"
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </div>
+                            )}
+                            <span>{formatCurrency(s.amount)}</span>
                           </div>
                         ) : (
-                          <div
-                            onClick={() => handleStartEditInternalNote(s)}
-                            className="cursor-pointer group flex items-start justify-between gap-1.5 p-1 rounded hover:bg-indigo-950/40 transition-colors"
-                            title="Clicca per inserire o modificare la nota interna (rimane solo a video)"
-                          >
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1 mb-0.5">
-                                <span className="text-[9px] uppercase font-bold text-indigo-300 bg-indigo-500/20 px-1.5 py-0.2 rounded border border-indigo-500/30 flex items-center gap-1 shrink-0">
-                                  <Lock className="h-2.5 w-2.5 text-indigo-400" />
-                                  <span>Solo a video</span>
-                                </span>
-                              </div>
-                              <p className={`text-xs ${s.internalNote ? 'text-indigo-100 font-medium' : 'text-slate-500 italic'}`}>
-                                {s.internalNote || 'Scrivi cosa chiedere al cliente...'}
-                              </p>
-                            </div>
-                            <Edit2 className="h-3 w-3 text-indigo-400/60 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5" />
-                          </div>
+                          '-'
                         )}
                       </td>
 
-                      {/* NOTE PER IL CLIENTE (STAMPATE SUL REPORT PDF) */}
-                      <td className="py-3 px-3.5">
-                        {isEditingCustomerNote ? (
-                          <div className="flex items-center gap-1.5 min-w-[160px]">
-                            <input
-                              type="text"
-                              value={editNote}
-                              onChange={(e) => setEditNote(e.target.value)}
-                              className="w-full bg-slate-950 border border-amber-400 rounded px-2 py-1 text-xs text-white focus:outline-none"
-                              placeholder="Nota per il cliente..."
-                              autoFocus
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleSaveEdit(s)}
-                              className="p-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded cursor-pointer shrink-0"
-                              title="Salva nota cliente"
-                            >
-                              <Save className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingId(null)}
-                              className="p-1 bg-slate-800 text-slate-400 rounded cursor-pointer shrink-0"
-                              title="Annulla"
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div
-                            onClick={() => handleStartEdit(s)}
-                            className="cursor-pointer group flex items-center justify-between gap-1 p-1 rounded hover:bg-slate-800/60 transition-colors"
-                            title="Clicca per modificare la nota cliente (stampata nel PDF)"
-                          >
-                            <span className="text-xs text-amber-300/90 group-hover:underline truncate max-w-[150px]">
-                              {s.customerNote || 'Aggiungi nota cliente...'}
-                            </span>
-                            <Edit2 className="h-3 w-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity ml-1 shrink-0" />
-                          </div>
-                        )}
-                      </td>
-
-                      {/* 1-Click Move to Cantiere */}
-                      <td className="py-3 px-3">
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-56 min-w-[200px]">
-                            <CantiereSearchSelect
-                              value={currentTarget}
-                              onChange={(val) => {
-                                setSelectedTargetByItem((prev) => ({
-                                  ...prev,
-                                  [s.id]: val,
-                                }));
-                              }}
-                              cantieri={cantieri}
-                              showSospesiOption={false}
-                              showIgnoreOption={false}
-                              placeholder="Cerca per nome o città..."
-                              size="sm"
-                            />
-                          </div>
-
+                      {/* AZIONI (Note, PDF, Edit, Trash) */}
+                      <td className="py-3 px-3 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
+                          {/* Note icon */}
                           <button
                             type="button"
-                            onClick={() => handleExecuteAssign(s.id)}
-                            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 shadow-sm"
-                            title="Sposta definitivamente questo movimento nella Scheda Cantiere"
+                            onClick={() => {
+                              setEditingRowNoteId(s.id);
+                              setEditingRowNoteText(rowNote || '');
+                            }}
+                            className={`p-1 rounded transition-colors cursor-pointer ${
+                              rowNote
+                                ? 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10'
+                                : 'text-slate-400 hover:text-amber-400'
+                            }`}
+                            title={
+                              rowNote
+                                ? `Nota: "${rowNote}" (clicca per modificare)`
+                                : 'Aggiungi nota su questa riga'
+                            }
                           >
-                            <span>Sposta</span>
-                            <ArrowRight className="h-3 w-3" />
+                            <FileText className="h-3.5 w-3.5" />
+                          </button>
+
+                          {/* PDF icon */}
+                          <button
+                            type="button"
+                            onClick={() => setManagingPdfSospeso(s)}
+                            className={`p-1 rounded transition-colors cursor-pointer ${
+                              s.attachmentPdf
+                                ? 'text-red-400 hover:text-red-300 hover:bg-red-500/10'
+                                : 'text-slate-400 hover:text-red-400'
+                            }`}
+                            title={
+                              s.attachmentPdf
+                                ? `Gestisci PDF allegato (${s.attachmentPdf.fileName})`
+                                : 'Allega PDF della fattura a questo documento'
+                            }
+                          >
+                            <Paperclip className="h-3.5 w-3.5" />
+                          </button>
+
+                          {/* Edit row icon */}
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditRow(s)}
+                            className="p-1 text-slate-400 hover:text-blue-400 rounded transition-colors cursor-pointer"
+                            title="Modifica riga (Fornitore, DDT, Importo, Data, Doc, Protocollo)"
+                          >
+                            <Edit2 className="h-3.5 w-3.5" />
+                          </button>
+
+                          {/* Trash icon (Dual Choice: Sposta in un cantiere o Elimina definitivamente) */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenActionModal(s)}
+                            className="p-1 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors cursor-pointer"
+                            title="Gestisci riga: Sposta in un Cantiere o Cancella Definitivamente"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </div>
-                      </td>
-
-                      {/* Azioni: Bottone Cancella Singola Voce */}
-                      <td className="py-3 px-2 text-right whitespace-nowrap">
-                        <button
-                          type="button"
-                          onClick={() => setSospesoToDelete(s)}
-                          className="p-1.5 text-slate-400 hover:text-white hover:bg-rose-600/90 rounded-lg transition-colors cursor-pointer"
-                          title="Elimina questa voce dalla Scheda Sospesi"
-                        >
-                          <Trash2 className="h-4 w-4 text-rose-400 hover:text-white transition-colors" />
-                        </button>
                       </td>
                     </tr>
                   );
@@ -930,130 +1106,465 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
             </tbody>
           </table>
         </div>
-
-        {/* Footer info */}
-        <div className="p-3 bg-slate-950 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-400">
-          <div className="flex items-center gap-2">
-            <HelpCircle className="h-4 w-4 text-amber-400 shrink-0" />
-            <span>
-              I movimenti nei Sospesi non incidono ancora sui costi dei cantieri fino a quando non vengono attribuiti.
-            </span>
-          </div>
-          <div className="flex items-center gap-4">
-            {sospesi.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setIsConfirmClearAllOpen(true)}
-                className="text-rose-400 hover:text-rose-300 font-medium underline text-xs cursor-pointer"
-              >
-                Cancella tutti i {sospesi.length} sospesi
-              </button>
-            )}
-            <span className="font-semibold text-slate-300">
-              Importo totale sospeso:{' '}
-              <strong className="text-amber-400 font-mono text-sm">{formatCurrency(totSospesi)}</strong>
-            </span>
-          </div>
-        </div>
       </div>
 
-      {/* Modal 1: Confirmation for Single Sospeso Deletion */}
-      <ConfirmModal
-        isOpen={!!sospesoToDelete}
-        title="Elimina Voce Sospesa"
-        message={
-          sospesoToDelete ? (
-            <div className="space-y-2">
-              <p>Eliminare definitivamente questa registrazione dalla Scheda Sospesi?</p>
-              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs font-mono space-y-1">
+      {/* ------------------------------------------------------------- */}
+      {/* TRASH ACTION MODAL (Choice: 1. Sposta in Cantiere | 2. Elimina) */}
+      {/* ------------------------------------------------------------- */}
+      {actionItem && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`p-2 rounded-xl shrink-0 ${
+                    actionStep === 'confirm_delete'
+                      ? 'bg-rose-500/20 text-rose-400'
+                      : 'bg-amber-500/20 text-amber-400'
+                  }`}
+                >
+                  {actionStep === 'confirm_delete' ? (
+                    <AlertTriangle className="h-5 w-5" />
+                  ) : (
+                    <Trash2 className="h-5 w-5" />
+                  )}
+                </div>
                 <div>
-                  <span className="text-slate-400">Data:</span> {formatDateItalian(sospesoToDelete.date)} •{' '}
-                  <span className="text-slate-400">Doc:</span> {sospesoToDelete.docNumber}
-                </div>
-                <div className="text-white font-sans font-semibold">
-                  {sospesoToDelete.supplier} - {sospesoToDelete.description}
-                </div>
-                <div className="text-amber-400 font-bold">
-                  Importo: {formatCurrency(sospesoToDelete.amount)}
+                  <h3 className="text-base font-bold text-white">
+                    {actionStep === 'choose_action' && 'Gestione Voce Sospesa'}
+                    {actionStep === 'confirm_move' && 'Conferma Spostamento nel Cantiere'}
+                    {actionStep === 'confirm_delete' && 'Conferma Cancellazione Definitiva'}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {actionStep === 'choose_action' &&
+                      'Scegli se spostare questo movimento in un cantiere oppure cancellarlo per sempre.'}
+                    {actionStep === 'confirm_move' &&
+                      'Verifica con attenzione il cantiere di destinazione prima di spostare la riga.'}
+                    {actionStep === 'confirm_delete' &&
+                      'Operazione irreversibile: la voce non sarà più recuperabile.'}
+                  </p>
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setActionItem(null);
+                  setActionStep('choose_action');
+                }}
+                className="text-slate-400 hover:text-white cursor-pointer p-1 rounded-lg hover:bg-slate-800 transition-colors"
+                title="Chiudi"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
-          ) : (
-            ''
-          )
-        }
-        confirmText="Elimina Voce"
-        cancelText="Annulla"
-        onConfirm={handleConfirmDeleteSingle}
-        onCancel={() => setSospesoToDelete(null)}
-      />
 
-      {/* Modal 2: Confirmation for Multiple Sospesi Deletion */}
-      <ConfirmModal
-        isOpen={isConfirmDeleteSelectedOpen}
-        title={`Elimina ${selectedIds.length} Voci Sospese`}
-        message={
-          <div className="space-y-2">
-            <p>
-              Sei sicuro di voler eliminare definitivamente le{' '}
-              <strong className="text-white">{selectedIds.length} voci sospese selezionate</strong>?
-            </p>
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs space-y-1">
-              <div className="text-rose-200">
-                Numero di registrazioni selezionate: <strong>{selectedIds.length}</strong>
+            {/* Document Highlight Card */}
+            <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 text-xs space-y-1 font-mono">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 font-sans font-bold">Documento:</span>
+                <span className="text-white font-bold">{actionItem.docNumber}</span>
               </div>
-              <div className="text-rose-300 font-bold font-mono">
-                Totale importo da eliminare: {formatCurrency(selectedAmount)}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 font-sans font-bold">Data:</span>
+                <span className="text-slate-200">{formatDateItalian(actionItem.date)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 font-sans font-bold">Fornitore:</span>
+                <span className="text-amber-300 font-bold uppercase">{actionItem.supplier}</span>
+              </div>
+              {actionItem.ddtNumber && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 font-sans font-bold">Riferimento DDT:</span>
+                  <span className="text-amber-200">{actionItem.ddtNumber}</span>
+                </div>
+              )}
+              {actionItem.protocol && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 font-sans font-bold">Protocollo:</span>
+                  <span className="text-slate-300">#{actionItem.protocol}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between pt-1 border-t border-slate-800">
+                <span className="text-slate-400 font-sans font-bold">Importo:</span>
+                <span className="text-rose-400 font-bold text-sm">
+                  {formatCurrency(actionItem.amount)}
+                </span>
               </div>
             </div>
-            <p className="text-xs text-slate-400">
-              Questa azione non potrà essere annullata.
-            </p>
+
+            {/* STEP 1: CHOOSE ACTION */}
+            {actionStep === 'choose_action' && (
+              <div className="space-y-3 pt-1">
+                <p className="text-xs font-semibold text-slate-300">
+                  Cosa desideri fare con questa voce? Scegli un'opzione:
+                </p>
+
+                {/* Option 1: Move to Cantiere */}
+                <div className="p-4 rounded-xl bg-blue-950/20 border border-blue-500/30 hover:border-blue-500/50 transition-all space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-blue-500/20 text-blue-300 rounded-lg shrink-0">
+                      <ArrowRightLeft className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-blue-300">
+                        1. Sposta in un Cantiere
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
+                        Cerca un cantiere esistente per nome o città, oppure creane uno nuovo.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <CantiereSearchSelect
+                      value={actionTargetCantiereId}
+                      onChange={setActionTargetCantiereId}
+                      cantieri={allCantieri}
+                      onCreateNew={() => {
+                        setCreateCantiereContext('single_action');
+                        setIsCreatingNewCantiere(true);
+                      }}
+                      showSospesiOption={false}
+                      showIgnoreOption={false}
+                      showUnassignedOption={false}
+                      placeholder="Cerca cantiere per nome o città..."
+                      size="sm"
+                    />
+
+                    <div className="text-right pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setActionStep('confirm_move')}
+                        disabled={!actionTargetCantiereId}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-sm inline-flex items-center gap-1.5"
+                      >
+                        <ArrowRightLeft className="h-3.5 w-3.5" />
+                        <span>Procedi allo Spostamento nel Cantiere →</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Option 2: Delete Permanently */}
+                <div className="p-4 rounded-xl bg-rose-950/20 border border-rose-500/30 hover:border-rose-500/50 transition-all space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-rose-500/20 text-rose-300 rounded-lg shrink-0">
+                      <Trash2 className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-rose-300">
+                        2. Elimina Definitivamente
+                      </div>
+                      <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
+                        Elimina in modo irreversibile questo movimento contabile da tutti i registri.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setActionStep('confirm_delete')}
+                      className="px-4 py-2 bg-rose-600/30 hover:bg-rose-600 text-rose-200 hover:text-white border border-rose-500/40 text-xs font-bold rounded-lg cursor-pointer transition-colors inline-flex items-center gap-1.5"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Cancella Definitivamente...</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-800 text-right">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActionItem(null);
+                      setActionStep('choose_action');
+                    }}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+                  >
+                    Annulla
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 2: CONFIRM MOVE TO CANTIERE */}
+            {actionStep === 'confirm_move' && (
+              <div className="space-y-4 pt-1 animate-fadeIn">
+                <div className="p-3.5 rounded-xl bg-blue-950/40 border border-blue-500/40 space-y-2">
+                  <div className="flex items-center gap-2 text-blue-300 font-bold text-xs uppercase tracking-wider">
+                    <Building className="h-4 w-4 text-blue-400 shrink-0" />
+                    <span>Cantiere di Destinazione Selezionato:</span>
+                  </div>
+
+                  {(() => {
+                    const targetC = allCantieri.find((c) => c.id === actionTargetCantiereId);
+                    if (!targetC) return null;
+                    return (
+                      <div className="bg-slate-900/90 p-3 rounded-lg border border-blue-500/30 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-slate-400 uppercase">
+                            Nome Cantiere:
+                          </span>
+                          <span className="text-sm font-black text-amber-400 uppercase">
+                            {targetC.name}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-slate-400 uppercase">
+                            Committente / Cliente:
+                          </span>
+                          <span className="text-xs font-bold text-white uppercase">
+                            {targetC.client || targetC.name}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold text-slate-400 uppercase">
+                            Città &amp; Indirizzo:
+                          </span>
+                          <span className="text-xs font-semibold text-slate-200 uppercase">
+                            {targetC.city}
+                            {targetC.address ? ` - ${targetC.address}` : ''}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-800/80">
+                          <span className="text-[11px] font-bold text-slate-400 uppercase">
+                            Esercizio Fiscale:
+                          </span>
+                          <span className="text-xs font-mono text-slate-300">
+                            Anno {targetC.year} • Stato {targetC.status}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div className="text-xs text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                  <p>
+                    ✓ Se confermi, la riga verrà rimossa dalla Scheda Sospesi e imputata al cantiere sopra indicato.
+                  </p>
+                  <p className="mt-1 text-slate-500">
+                    I campi nota rimarranno vuoti e la colonna fornitore riporterà i riferimenti del DDT.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setActionStep('choose_action')}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+                  >
+                    ← Torna Indietro (Annulla)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmActionMove}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors shadow-lg inline-flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>Conferma e Sposta nel Cantiere</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 2: CONFIRM PERMANENT DELETE */}
+            {actionStep === 'confirm_delete' && (
+              <div className="space-y-4 pt-1 animate-fadeIn">
+                <div className="p-4 rounded-xl bg-rose-950/50 border-2 border-rose-500/70 text-rose-200 space-y-2">
+                  <div className="flex items-center gap-2 text-rose-300 font-bold text-sm">
+                    <AlertTriangle className="h-5 w-5 shrink-0 text-rose-400" />
+                    <span>ATTENZIONE: CANCELLAZIONE DEFINITIVA IRREVERSIBILE</span>
+                  </div>
+                  <p className="text-xs leading-relaxed text-rose-200/90 font-medium">
+                    Stai per eliminare per sempre questo documento dai Sospesi.
+                    Questa operazione <strong className="text-white underline">non può essere annullata</strong> e la voce <strong className="text-white">non sarà più recuperabile</strong> in alcun registro.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setActionStep('choose_action')}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+                  >
+                    ← Annulla
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmActionDelete}
+                    className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors shadow-lg inline-flex items-center gap-1.5"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    <span>Sì, Cancella Definitivamente</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-        }
-        confirmText={`Elimina ${selectedIds.length} Voci`}
-        cancelText="Annulla"
-        onConfirm={handleConfirmDeleteSelected}
-        onCancel={() => setIsConfirmDeleteSelectedOpen(false)}
-      />
+        </div>
+      )}
 
-      {/* Modal 3: Confirmation for Clearing ALL Sospesi */}
-      <ConfirmModal
-        isOpen={isConfirmClearAllOpen}
-        title="Cancella Tutti i Sospesi"
-        message={
-          <div className="space-y-2">
-            <p>
-              Sei sicuro di voler cancellare <strong className="text-rose-400">TUTTE</strong> le registrazioni della Scheda Sospesi?
-            </p>
-            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs space-y-1">
-              <div className="text-rose-200">
-                Voci totali da eliminare: <strong>{sospesi.length}</strong>
+      {/* ------------------------------------------------------------- */}
+      {/* BULK MOVE CONFIRMATION MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {bulkAssignConfirmTarget && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-slate-900 border border-blue-500/40 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2.5 pb-3 border-b border-slate-800">
+              <div className="p-2 bg-blue-500/20 text-blue-400 rounded-xl shrink-0">
+                <ArrowRightLeft className="h-5 w-5" />
               </div>
-              <div className="text-rose-300 font-bold font-mono text-sm">
-                Importo totale azzerato: {formatCurrency(totSospesi)}
+              <div>
+                <h3 className="text-base font-bold text-white">
+                  Conferma Spostamento Multiplo
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Verifica i dettagli del cantiere dove sposterai le{' '}
+                  <strong className="text-amber-300">
+                    {bulkAssignConfirmTarget.items.length} voci selezionate
+                  </strong>
+                  .
+                </p>
               </div>
             </div>
-            <p className="text-xs text-slate-400">
-              Verranno rimosse tutte le voci in sospeso dell'artigiano corrente.
-            </p>
-          </div>
-        }
-        confirmText="Cancella Tutti i Sospesi"
-        cancelText="Annulla"
-        onConfirm={handleConfirmClearAll}
-        onCancel={() => setIsConfirmClearAllOpen(false)}
-      />
 
-      {/* Modal for PDF Management on Sospeso Item with multi-cantiere sync */}
-      <PdfAttachmentModal
-        isOpen={!!managingPdfSospeso}
-        onClose={() => setManagingPdfSospeso(null)}
-        sospeso={managingPdfSospeso}
-        allCantieri={cantieri}
-        sospesi={sospesi}
-        onSavePdf={handleSavePdf}
-      />
+            <div className="bg-slate-950/90 p-3.5 rounded-xl border border-blue-500/30 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 font-bold uppercase">Cantiere Destinazione:</span>
+                <span className="text-sm font-black text-amber-400 uppercase">
+                  {bulkAssignConfirmTarget.cantiere.name}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 font-bold uppercase">Committente:</span>
+                <span className="font-bold text-white uppercase">
+                  {bulkAssignConfirmTarget.cantiere.client ||
+                    bulkAssignConfirmTarget.cantiere.name}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 font-bold uppercase">Città &amp; Indirizzo:</span>
+                <span className="text-slate-200 uppercase font-semibold">
+                  {bulkAssignConfirmTarget.cantiere.city}
+                  {bulkAssignConfirmTarget.cantiere.address
+                    ? ` - ${bulkAssignConfirmTarget.cantiere.address}`
+                    : ''}
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t border-slate-800">
+                <span className="text-slate-400 font-bold uppercase">Voci da Spostare:</span>
+                <span className="text-white font-mono font-bold">
+                  {bulkAssignConfirmTarget.items.length} righe (Tot:{' '}
+                  {formatCurrency(
+                    bulkAssignConfirmTarget.items.reduce(
+                      (acc, it) => acc + (Number(it.amount) || 0),
+                      0
+                    )
+                  )}
+                  )
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setBulkAssignConfirmTarget(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmBulkAssign}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors shadow-lg inline-flex items-center gap-1.5"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                <span>Conferma e Sposta Tutti</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* BULK DELETE CONFIRMATION MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {isConfirmDeleteSelectedOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-slate-900 border border-rose-500/40 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2.5 pb-3 border-b border-slate-800">
+              <div className="p-2 bg-rose-500/20 text-rose-400 rounded-xl shrink-0">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">
+                  Cancellazione Multipla ({selectedIds.length} voci)
+                </h3>
+                <p className="text-xs text-rose-300 font-semibold">
+                  Operazione irreversibile
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs leading-relaxed text-slate-300">
+              Stai per eliminare per sempre{' '}
+              <strong className="text-white">{selectedIds.length} voci selezionate</strong> dai
+              Sospesi per un importo totale di{' '}
+              <strong className="text-rose-400 font-mono">{formatCurrency(selectedAmount)}</strong>.
+              Nessuna voce sarà più recuperabile.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsConfirmDeleteSelectedOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+              >
+                Annulla
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteSelected}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors shadow-lg inline-flex items-center gap-1.5"
+              >
+                <Trash2 className="h-4 w-4" />
+                <span>Cancella Definitivamente</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* CREATE NEW CANTIERE MODAL (Triggered from search dropdown) */}
+      {/* ------------------------------------------------------------- */}
+      {isCreatingNewCantiere && (
+        <CantiereModal
+          zIndex="z-[70]"
+          onClose={() => {
+            setIsCreatingNewCantiere(false);
+            setCreateCantiereContext(null);
+          }}
+          onSave={handleSaveNewCantiere}
+        />
+      )}
+
+      {/* ------------------------------------------------------------- */}
+      {/* PDF ATTACHMENT MODAL */}
+      {/* ------------------------------------------------------------- */}
+      {managingPdfSospeso && (
+        <PdfAttachmentModal
+          isOpen={Boolean(managingPdfSospeso)}
+          sospeso={managingPdfSospeso}
+          allCantieri={allCantieri}
+          sospesi={sospesi}
+          onSavePdf={handleSavePdf}
+          onClose={() => setManagingPdfSospeso(null)}
+        />
+      )}
     </div>
   );
 };

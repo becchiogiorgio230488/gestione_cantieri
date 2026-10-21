@@ -737,6 +737,8 @@ export default function App() {
     let totalAssigned = 0;
     const newSospesi: SospesoItem[] = sospesiItems.map((it, idx) => ({
       ...it,
+      customerNote: undefined,
+      internalNote: undefined,
       id: `sosp-${Date.now()}-${idx}`,
       createdAt: new Date().toISOString(),
     }));
@@ -793,6 +795,8 @@ export default function App() {
 
     const newSospesi: SospesoItem[] = items.map((it, idx) => ({
       ...it,
+      customerNote: undefined,
+      internalNote: undefined,
       id: `sosp-${Date.now()}-${idx}`,
       createdAt: new Date().toISOString(),
     }));
@@ -1029,6 +1033,9 @@ export default function App() {
     if (!currentArtigiano) return;
 
     const sourceC = currentArtigiano.cantieri?.find((c) => c.id === cantiereId);
+    const ddtTags = extractDdtEntriesFromMovement(movement);
+    const ddtNumberStr = ddtTags.length > 0 ? ddtTags.join(', ') : undefined;
+
     const newSospeso: SospesoItem = {
       id: `sosp-${Date.now()}`,
       date: movement.date,
@@ -1038,8 +1045,10 @@ export default function App() {
       amount: movement.purchases || movement.issued || 0,
       protocol: movement.protocol || undefined,
       client: sourceC?.client || undefined,
+      ddtNumber: ddtNumberStr,
       status: 'in_attesa_cliente',
-      customerNote: 'Spostato da cantiere in attesa di chiarimento col committente',
+      customerNote: undefined,
+      internalNote: undefined,
       createdAt: new Date().toISOString(),
     };
 
@@ -1269,7 +1278,7 @@ export default function App() {
           issued: 0,
           source: 'xml',
           attachmentPdf: sosp.attachmentPdf,
-          notes: sosp.customerNote ? `Nota: ${sosp.customerNote}` : 'Spostato da Scheda Sospesi',
+          notes: sosp.customerNote ? `Nota: ${sosp.customerNote}` : '',
           xmlRef: {
             supplier: supplier,
             invoiceNum: sosp.docNumber,
@@ -1394,7 +1403,7 @@ export default function App() {
             issued: 0,
             source: 'xml',
             attachmentPdf: sosp.attachmentPdf,
-            notes: sosp.customerNote ? `Nota: ${sosp.customerNote}` : 'Spostato da Scheda Sospesi',
+            notes: sosp.customerNote ? `Nota: ${sosp.customerNote}` : '',
             xmlRef: {
               supplier: supplier,
               invoiceNum: sosp.docNumber,
@@ -1753,6 +1762,7 @@ export default function App() {
             onOpenFatturaEmessa={() => setIsFatturaEmessaModalOpen(true)}
             onOpenProtocolSearch={handleOpenProtocolSearch}
             onPrint={() => setIsPrintCantiereView(true)}
+            onCreateNewCantiereDirectly={handleCreateNewCantiereDirectly}
           />
         )}
 
@@ -1773,6 +1783,7 @@ export default function App() {
             onAddManualSospeso={handleAddManualSospeso}
             onOpenExcelImport={() => setIsExcelModalOpen(true)}
             onPrintReport={() => setIsPrintSospesiView(true)}
+            onCreateNewCantiereDirectly={handleCreateNewCantiereDirectly}
           />
         )}
       </main>

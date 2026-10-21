@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   ArrowLeft,
   FileSpreadsheet,
@@ -35,6 +35,7 @@ import { findLinkedInvoiceMovementsAcrossCantieri } from '../utils/invoiceDuplic
 import { CantiereSearchSelect } from './CantiereSearchSelect';
 import { openOrDownloadPdf } from '../utils/pdfStorage';
 import { PdfAttachmentModal } from './PdfAttachmentModal';
+import { CantiereModal } from './CantiereModal';
 
 interface SchedaCantiereViewProps {
   cantiere: Cantiere;
@@ -64,6 +65,7 @@ interface SchedaCantiereViewProps {
   onOpenFatturaEmessa: () => void;
   onOpenProtocolSearch?: (initialProtocol?: string) => void;
   onPrint: () => void;
+  onCreateNewCantiereDirectly?: (cantiereData: Partial<Cantiere>) => Cantiere;
 }
 
 export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
@@ -85,6 +87,7 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
   onOpenFatturaEmessa,
   onOpenProtocolSearch,
   onPrint,
+  onCreateNewCantiereDirectly,
 }) => {
   const totals = calculateCantiereTotals(cantiere);
 
@@ -114,7 +117,55 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
     linkedInfo: ReturnType<typeof findLinkedInvoiceMovementsAcrossCantieri>;
   } | null>(null);
   const [targetMoveCantiereId, setTargetMoveCantiereId] = useState<string>('');
-  const [deleteModalStep, setDeleteModalStep] = useState<'choose_action' | 'confirm_permanent_delete'>('choose_action');
+  const [deleteModalStep, setDeleteModalStep] = useState<
+    'choose_action' | 'confirm_move_sospesi' | 'confirm_move_cantiere' | 'confirm_permanent_delete'
+  >('choose_action');
+
+  // Support creating new cantiere on the fly from the action modal
+  const [localExtraCantieri, setLocalExtraCantieri] = useState<Cantiere[]>([]);
+  const [isCreatingNewCantiere, setIsCreatingNewCantiere] = useState(false);
+
+  const mergedCantieri = useMemo(() => {
+    const map = new Map<string, Cantiere>();
+    allCantieri.forEach((c) => map.set(c.id, c));
+    localExtraCantieri.forEach((c) => map.set(c.id, c));
+    return Array.from(map.values());
+  }, [allCantieri, localExtraCantieri]);
+
+  const otherCantieri = useMemo(() => {
+    return mergedCantieri.filter((c) => c.id !== cantiere.id);
+  }, [mergedCantieri, cantiere.id]);
+
+  const handleSaveNewCantiere = (cantiereData: Partial<Cantiere>) => {
+    let newC: Cantiere;
+    if (onCreateNewCantiereDirectly) {
+      newC = onCreateNewCantiereDirectly(cantiereData);
+    } else {
+      const upperName = (cantiereData.name || 'NUOVO CANTIERE').trim().toUpperCase();
+      const upperCity = (cantiereData.city || cantiere.city || 'MILANO').trim().toUpperCase();
+      const upperAddress = cantiereData.address?.trim() ? cantiereData.address.trim().toUpperCase() : '';
+      newC = {
+        id: `cantiere-${Date.now()}`,
+        name: upperName,
+        city: upperCity,
+        address: upperAddress || '',
+        date: cantiereData.date || new Date().toISOString().slice(0, 10),
+        year: cantiereData.year || 2026,
+        client: upperName,
+        initialInventory: cantiereData.initialInventory || 0,
+        finalInventory: cantiereData.finalInventory || 0,
+        category: cantiereData.category || 'idraulico',
+        status: cantiereData.status || 'attivo',
+        notes: cantiereData.notes || '',
+        movements: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    setLocalExtraCantieri((prev) => [...prev, newC]);
+    setTargetMoveCantiereId(newC.id);
+    setIsCreatingNewCantiere(false);
+  };
 
   const [isConfirmDeleteCantiereOpen, setIsConfirmDeleteCantiereOpen] = useState(false);
   const [newMovementError, setNewMovementError] = useState<string | null>(null);
@@ -134,6 +185,14 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [addressValue, setAddressValue] = useState<string>(cantiere.address || '');
   const [cityValue, setCityValue] = useState<string>(cantiere.city || '');
+
+  // Quick edit state for Cantiere Notes
+  const [isEditingCantiereNotes, setIsEditingCantiereNotes] = useState(false);
+  const [cantiereNotesValue, setCantiereNotesValue] = useState<string>(cantiere.notes || '');
+
+  // Quick inline edit state for a movement's note
+  const [editingRowNoteId, setEditingRowNoteId] = useState<string | null>(null);
+  const [editingRowNoteText, setEditingRowNoteText] = useState<string>('');
 
   // Search filter for movements
   const [movSearch, setMovSearch] = useState('');
@@ -202,7 +261,29 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
     setCityValue(cantiere.city || '');
     setRiValue(cantiere.initialInventory.toString());
     setRfValue((cantiere.finalInventory || 0).toString());
+    setCantiereNotesValue(cantiere.notes || '');
   }, [cantiere]);
+
+  const handleSaveCantiereNotes = () => {
+    onUpdateCantiere({
+      ...cantiere,
+      notes: cantiereNotesValue.trim(),
+      updatedAt: new Date().toISOString(),
+    });
+    setIsEditingCantiereNotes(false);
+  };
+
+  const handleSaveRowNote = (mov: Movement) => {
+    const updatedNotes = editingRowNoteText.trim() || undefined;
+    onUpdateCantiere({
+      ...cantiere,
+      movements: cantiere.movements.map((m) =>
+        m.id === mov.id ? { ...m, notes: updatedNotes } : m
+      ),
+      updatedAt: new Date().toISOString(),
+    });
+    setEditingRowNoteId(null);
+  };
 
   const handleStartAddMovement = (type: 'acquisto' | 'emessa') => {
     setNewMovementType(type);
@@ -271,9 +352,9 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
       sospesi
     );
 
-    const otherCantieri = allCantieri.filter((c) => c.id !== cantiere.id);
-    if (otherCantieri.length > 0) {
-      setTargetMoveCantiereId(otherCantieri[0].id);
+    const availableOther = otherCantieri;
+    if (availableOther.length > 0) {
+      setTargetMoveCantiereId(availableOther[0].id);
     } else {
       setTargetMoveCantiereId('');
     }
@@ -829,6 +910,91 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
               </p>
             </div>
           </div>
+
+          {/* Row 3: NOTE CANTIERE */}
+          <div className="bg-slate-950/80 p-3.5 rounded-lg border border-slate-800">
+            <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-amber-400" />
+                <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider">
+                  Note &amp; Accordi Cantiere
+                </span>
+                {cantiere.notes && !isEditingCantiereNotes && (
+                  <span className="px-2 py-0.2 rounded bg-amber-500/10 text-amber-300 text-[10px] font-bold border border-amber-500/20">
+                    Nota attiva
+                  </span>
+                )}
+              </div>
+              {!isEditingCantiereNotes && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCantiereNotesValue(cantiere.notes || '');
+                    setIsEditingCantiereNotes(true);
+                  }}
+                  className="text-[11px] text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 cursor-pointer hover:underline"
+                  title="Modifica note cantiere"
+                >
+                  <Edit2 className="h-3 w-3" />
+                  <span>{cantiere.notes ? 'Modifica Note' : '+ Inserisci Note'}</span>
+                </button>
+              )}
+            </div>
+
+            {isEditingCantiereNotes ? (
+              <div className="space-y-2 mt-2">
+                <textarea
+                  value={cantiereNotesValue}
+                  onChange={(e) => setCantiereNotesValue(e.target.value)}
+                  rows={3}
+                  placeholder="Inserisci note generali per il cantiere (es. accordi con committente, SAL, tempistiche concordate, contatti responsabili, materiali speciali)..."
+                  className="w-full bg-slate-900 border border-amber-400 rounded-lg p-2.5 text-xs text-white placeholder-slate-500 focus:outline-none shadow-inner"
+                  autoFocus
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveCantiereNotes}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded text-xs font-bold flex items-center gap-1 cursor-pointer shadow-sm transition-colors"
+                  >
+                    <Save className="h-3.5 w-3.5" />
+                    <span>Salva Note Cantiere</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCantiereNotesValue(cantiere.notes || '');
+                      setIsEditingCantiereNotes(false);
+                    }}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs cursor-pointer flex items-center gap-1 transition-colors"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    <span>Annulla</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div
+                onClick={() => {
+                  setCantiereNotesValue(cantiere.notes || '');
+                  setIsEditingCantiereNotes(true);
+                }}
+                className="cursor-pointer group rounded p-2 hover:bg-slate-900/60 transition-colors"
+                title="Clicca per modificare le note del cantiere"
+              >
+                {cantiere.notes ? (
+                  <p className="text-xs text-slate-200 whitespace-pre-wrap leading-relaxed">
+                    {cantiere.notes}
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-500 italic flex items-center gap-1.5">
+                    <span>Nessuna nota registrata per questo cantiere. Clicca qui per aggiungere note o accordi.</span>
+                    <Plus className="h-3 w-3 opacity-0 group-hover:opacity-100 text-amber-400 transition-opacity" />
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -945,6 +1111,19 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                 }`}
               />
             </div>
+
+            <div className="sm:col-span-2 lg:col-span-3">
+              <label className="block text-slate-400 font-semibold mb-1">
+                NOTE SULLA RIGA (OPZIONALE)
+              </label>
+              <input
+                type="text"
+                placeholder="es. Materiale per il secondo piano, concordato sconto 5%, rif. ordine..."
+                value={newMovement.notes || ''}
+                onChange={(e) => setNewMovement({ ...newMovement, notes: e.target.value })}
+                className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-amber-400 text-xs"
+              />
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
@@ -1046,6 +1225,18 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                               })
                             }
                             className="w-full bg-slate-900 border border-slate-700 rounded px-1.5 py-1 text-xs text-white"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Note riga..."
+                            value={editMovementData.notes || ''}
+                            onChange={(e) =>
+                              setEditMovementData({
+                                ...editMovementData,
+                                notes: e.target.value,
+                              })
+                            }
+                            className="w-full bg-slate-950 border border-amber-400/50 rounded px-1.5 py-0.5 text-[11px] text-amber-200 placeholder-slate-500 mt-1"
                           />
                         </td>
                         <td className="p-2">
@@ -1159,10 +1350,76 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                         </div>
                       </td>
 
-                      {/* TIPO DOC. / FORNITORE / CLIENTE */}
+                      {/* TIPO DOC. / FORNITORE / CLIENTE & NOTE RIGA */}
                       <td className="py-3 px-4">
                         <div className="font-semibold text-slate-100">{m.typeAndSubject}</div>
-                        {m.notes && <div className="text-xs text-slate-400 mt-0.5">{m.notes}</div>}
+                        {editingRowNoteId === m.id ? (
+                          <div className="mt-1.5 flex items-center gap-1.5 animate-fadeIn">
+                            <input
+                              type="text"
+                              value={editingRowNoteText}
+                              onChange={(e) => setEditingRowNoteText(e.target.value)}
+                              placeholder="Scrivi nota per questa riga..."
+                              className="w-full bg-slate-950 border border-amber-400 rounded px-2 py-1 text-xs text-white focus:outline-none shadow-inner"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleSaveRowNote(m);
+                                } else if (e.key === 'Escape') {
+                                  setEditingRowNoteId(null);
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSaveRowNote(m)}
+                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-sm shrink-0"
+                              title="Salva nota"
+                            >
+                              <Save className="h-3 w-3" />
+                              <span>Salva</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingRowNoteId(null)}
+                              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs cursor-pointer transition-colors shrink-0"
+                              title="Annulla"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="mt-1 flex items-center gap-2 flex-wrap">
+                            {m.notes ? (
+                              <div
+                                onClick={() => {
+                                  setEditingRowNoteId(m.id);
+                                  setEditingRowNoteText(m.notes || '');
+                                }}
+                                className="group/note inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-800 text-amber-300/95 hover:text-amber-200 border border-slate-700/80 cursor-pointer text-xs transition-colors"
+                                title="Clicca per modificare la nota di questa riga"
+                              >
+                                <FileText className="h-3 w-3 text-amber-400 shrink-0" />
+                                <span className="font-sans font-medium">{m.notes}</span>
+                                <Edit2 className="h-2.5 w-2.5 text-slate-400 opacity-0 group-hover/note:opacity-100 transition-opacity ml-0.5" />
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingRowNoteId(m.id);
+                                  setEditingRowNoteText('');
+                                }}
+                                className="text-[11px] text-slate-500 hover:text-amber-400 flex items-center gap-1 cursor-pointer transition-colors"
+                                title="Aggiungi una nota a questa riga"
+                              >
+                                <Plus className="h-3 w-3" />
+                                <span>Aggiungi nota</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
 
                       {/* N./PROT */}
@@ -1218,6 +1475,25 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                         <div className="flex items-center justify-end gap-1">
                           <button
                             type="button"
+                            onClick={() => {
+                              setEditingRowNoteId(m.id);
+                              setEditingRowNoteText(m.notes || '');
+                            }}
+                            className={`p-1 rounded transition-colors cursor-pointer ${
+                              m.notes
+                                ? 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/10'
+                                : 'text-slate-400 hover:text-amber-400'
+                            }`}
+                            title={
+                              m.notes
+                                ? `Nota: "${m.notes}" (clicca per modificare)`
+                                : 'Aggiungi nota su questa riga'
+                            }
+                          >
+                            <FileText className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => setManagingPdfMovement(m)}
                             className={`p-1 rounded transition-colors cursor-pointer ${
                               m.attachmentPdf
@@ -1234,9 +1510,21 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                           </button>
                           {onMoveToSospesi && m.purchases !== 0 && (
                             <button
-                              onClick={() => onMoveToSospesi(m)}
+                              onClick={() => {
+                                const linkedInfo = findLinkedInvoiceMovementsAcrossCantieri(
+                                  m,
+                                  cantiere.id,
+                                  allCantieri,
+                                  sospesi
+                                );
+                                setDeleteModalStep('confirm_move_sospesi');
+                                setMovementActionData({
+                                  movement: m,
+                                  linkedInfo,
+                                });
+                              }}
                               className="p-1 text-slate-400 hover:text-amber-400 rounded transition-colors cursor-pointer"
-                              title="Invia questo DDT / costo alla Scheda Sospesi"
+                              title="Invia questo DDT / costo alla Scheda Sospesi (conferma richiesta)"
                             >
                               <Layers className="h-3.5 w-3.5" />
                             </button>
@@ -1456,7 +1744,7 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                           1. Sposta nella Scheda Sospesi
                         </div>
                         <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
-                          Rimuove il costo da questo cantiere e lo conserva nei Sospesi per decidere in seguito con il committente.
+                          Rimuove il costo da questo cantiere e lo trasferisce nei Sospesi. Le note rimarranno completamente vuote.
                         </p>
                       </div>
                     </div>
@@ -1464,11 +1752,11 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                   <div className="text-right pt-1">
                     <button
                       type="button"
-                      onClick={handleConfirmMoveToSospesi}
+                      onClick={() => setDeleteModalStep('confirm_move_sospesi')}
                       className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-sm inline-flex items-center gap-1.5"
                     >
                       <Layers className="h-3.5 w-3.5" />
-                      <span>Sposta nei Sospesi</span>
+                      <span>Procedi allo Spostamento nei Sospesi →</span>
                     </button>
                   </div>
                 </div>
@@ -1484,39 +1772,35 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                         2. Sposta in un altro Cantiere
                       </div>
                       <p className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
-                        Trasferisce direttamente questo DDT/costo nella scheda di un altro cantiere dello stesso artigiano.
+                        Cerca tra i cantieri esistenti o creane uno nuovo per trasferire direttamente questo DDT/costo.
                       </p>
                     </div>
                   </div>
 
-                  {allCantieri.filter((c) => c.id !== cantiere.id).length > 0 ? (
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
-                      <div className="flex-1 min-w-0">
-                        <CantiereSearchSelect
-                          value={targetMoveCantiereId}
-                          onChange={setTargetMoveCantiereId}
-                          cantieri={allCantieri.filter((c) => c.id !== cantiere.id)}
-                          showSospesiOption={false}
-                          showIgnoreOption={false}
-                          placeholder="Cerca cantiere per nome o città..."
-                          size="sm"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleConfirmMoveToOtherCantiere}
-                        disabled={!targetMoveCantiereId}
-                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-sm shrink-0 inline-flex items-center justify-center gap-1.5"
-                      >
-                        <ArrowRightLeft className="h-3.5 w-3.5" />
-                        <span>Sposta nel Cantiere</span>
-                      </button>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                    <div className="flex-1 min-w-0">
+                      <CantiereSearchSelect
+                        value={targetMoveCantiereId}
+                        onChange={setTargetMoveCantiereId}
+                        cantieri={otherCantieri}
+                        onCreateNew={() => setIsCreatingNewCantiere(true)}
+                        showSospesiOption={false}
+                        showIgnoreOption={false}
+                        showUnassignedOption={false}
+                        placeholder="Cerca cantiere o clicca '+ Crea Nuovo Cantiere'..."
+                        size="sm"
+                      />
                     </div>
-                  ) : (
-                    <div className="text-[11px] text-slate-500 italic bg-slate-950/40 p-2 rounded-lg border border-slate-800">
-                      Nessun altro cantiere registrato per questo artigiano. Creane prima un altro se desideri spostarlo.
-                    </div>
-                  )}
+                    <button
+                      type="button"
+                      onClick={() => setDeleteModalStep('confirm_move_cantiere')}
+                      disabled={!targetMoveCantiereId}
+                      className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-lg cursor-pointer transition-colors shadow-sm shrink-0 inline-flex items-center justify-center gap-1.5"
+                    >
+                      <ArrowRightLeft className="h-3.5 w-3.5" />
+                      <span>Procedi allo Spostamento nel Cantiere →</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Option 3: Delete Permanently */}
@@ -1553,6 +1837,142 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                     className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
                   >
                     Annulla
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 2A: CONFIRM MOVE TO SOSPESI (WITH CLEAN NOTES REMINDER) */}
+            {deleteModalStep === 'confirm_move_sospesi' && (
+              <div className="space-y-4 pt-1 animate-fadeIn">
+                <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/40 space-y-2">
+                  <div className="flex items-center gap-2 text-amber-300 font-bold text-xs uppercase tracking-wider">
+                    <Layers className="h-4 w-4 text-amber-400 shrink-0" />
+                    <span>Destinazione: Scheda Sospesi ({artigianoName || 'Artigiano'})</span>
+                  </div>
+                  <div className="bg-slate-900/90 p-3 rounded-lg border border-amber-500/30 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-bold uppercase">Documento:</span>
+                      <span className="text-white font-bold">{movementActionData.movement.docNumber}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-bold uppercase">Data:</span>
+                      <span className="text-slate-200 font-mono">{formatDateItalian(movementActionData.movement.date)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-bold uppercase">Fornitore / Tipo Doc:</span>
+                      <span className="text-slate-100 font-medium">{movementActionData.movement.typeAndSubject}</span>
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800">
+                      <span className="text-slate-400 font-bold uppercase">Importo Spostato:</span>
+                      <span className="text-rose-400 font-mono font-bold text-sm">
+                        {formatCurrency(movementActionData.movement.purchases || movementActionData.movement.issued)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-xs text-slate-300 bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1.5">
+                  <p className="font-semibold text-amber-300 flex items-center gap-1.5">
+                    <AlertCircle className="h-4 w-4 text-amber-400" />
+                    <span>Verifica dello spostamento nei Sospesi:</span>
+                  </p>
+                  <p className="text-slate-400 leading-relaxed">
+                    • La voce verrà rimossa dal cantiere attuale (<strong className="text-white">{cantiere.name}</strong>).<br />
+                    • Nella Scheda Sospesi i campi <strong>Nota Interna</strong> (non stampata) e <strong>Nota per il Cliente</strong> (stampata) rimarranno <strong>completamente vuoti</strong>.<br />
+                    • La colonna fornitore riporterà unicamente il fornitore e gli estremi del DDT.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteModalStep('choose_action')}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+                  >
+                    ← Torna Indietro (Annulla)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmMoveToSospesi}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-xl cursor-pointer transition-colors shadow-lg inline-flex items-center gap-1.5"
+                  >
+                    <CheckCircle className="h-4 w-4" />
+                    <span>Conferma Spostamento nei Sospesi</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STEP 2B: CONFIRM MOVE TO ANOTHER CANTIERE (CLEAR TARGET DETAILS) */}
+            {deleteModalStep === 'confirm_move_cantiere' && (
+              <div className="space-y-4 pt-1 animate-fadeIn">
+                <div className="p-3.5 rounded-xl bg-blue-950/40 border border-blue-500/40 space-y-2">
+                  <div className="flex items-center gap-2 text-blue-300 font-bold text-xs uppercase tracking-wider">
+                    <Building className="h-4 w-4 text-blue-400 shrink-0" />
+                    <span>Cantiere di Destinazione Selezionato:</span>
+                  </div>
+
+                  {(() => {
+                    const targetC = mergedCantieri.find((c) => c.id === targetMoveCantiereId);
+                    if (!targetC) return null;
+                    return (
+                      <div className="bg-slate-900/90 p-3 rounded-lg border border-blue-500/30 space-y-1.5 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-400 uppercase">Nome Cantiere:</span>
+                          <span className="font-black text-amber-400 uppercase text-sm">{targetC.name}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-400 uppercase">Committente / Cliente:</span>
+                          <span className="font-bold text-white uppercase">{targetC.client || targetC.name}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-400 uppercase">Città &amp; Indirizzo:</span>
+                          <span className="font-semibold text-slate-200 uppercase">
+                            {targetC.city}{targetC.address ? ` - ${targetC.address}` : ''}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-800">
+                          <span className="font-bold text-slate-400 uppercase">Esercizio Fiscale:</span>
+                          <span className="font-mono text-slate-300">Anno {targetC.year} • Stato {targetC.status}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-bold uppercase">Documento da trasferire:</span>
+                    <span className="text-white font-bold">{movementActionData.movement.docNumber}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-bold uppercase">Descrizione / Fornitore:</span>
+                    <span className="text-slate-200">{movementActionData.movement.typeAndSubject}</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
+                    <span className="text-slate-400 font-bold uppercase">Importo Trasferito:</span>
+                    <span className="text-rose-400 font-mono font-bold text-sm">
+                      {formatCurrency(movementActionData.movement.purchases || movementActionData.movement.issued)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteModalStep('choose_action')}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+                  >
+                    ← Torna Indietro (Annulla)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmMoveToOtherCantiere}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors shadow-lg inline-flex items-center gap-1.5"
+                  >
+                    <ArrowRightLeft className="h-4 w-4" />
+                    <span>Conferma e Sposta nel Cantiere</span>
                   </button>
                 </div>
               </div>
@@ -1669,6 +2089,15 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
             onDeleteCantiere(cantiere.id);
           }}
           onCancel={() => setIsConfirmDeleteCantiereOpen(false)}
+        />
+      )}
+
+      {/* Create New Cantiere Modal (from combobox inside action modal) */}
+      {isCreatingNewCantiere && (
+        <CantiereModal
+          zIndex="z-[70]"
+          onClose={() => setIsCreatingNewCantiere(false)}
+          onSave={handleSaveNewCantiere}
         />
       )}
 

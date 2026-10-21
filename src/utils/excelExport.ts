@@ -2,7 +2,7 @@ import ExcelJS from 'exceljs';
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { Artigiano, Cantiere, SospesoItem, QuadraturaContabile } from '../types';
-import { calculateCantiereTotals, computeCantiereRF, formatDateItalian } from './calculations';
+import { calculateCantiereTotals, calculateArtigianoTotals, computeCantiereRF, formatDateItalian } from './calculations';
 import { getCantiereFileName } from './pdfExport';
 
 /**
@@ -103,6 +103,14 @@ export function buildCantiereDetailSheet(
   // CITTA': [Città - Indirizzo]
   // DEL: [Nome Committente CENTRATO] | DATA: [Data]
   // -------------------------------------------------------------
+  // HEADER BLOCKS (Rows 1 to 4) - TESTO PERFETTAMENTE CENTRATO
+  // CANTIERE: [Nome Cantiere]
+  // DITTA: [Nome Ditta]
+  // CITTA': [Città - Indirizzo]
+  // DEL: [Nome Committente] | DATA: [Data]
+  // % UTILE CANTIERE: [+XX.X%] | UTILE EFFETTIVO: [€ XXX.XX]
+  // -------------------------------------------------------------
+  const totals = calculateCantiereTotals(cantiere);
   const nomeCantiere = (cantiere.name || '').toUpperCase();
   const cittaCantiere = (cantiere.city || '').toUpperCase();
   const indirizzoCantiere = (cantiere.address || '').toUpperCase();
@@ -110,6 +118,8 @@ export function buildCantiereDetailSheet(
   const finalDitta = (dittaName || 'IMPRESA').toUpperCase();
   const dataStampa = new Date().toLocaleDateString('it-IT');
   const annoCantiere = cantiere.year || 2026;
+  const percSign = totals.marginePercentuale >= 0 ? '+' : '';
+  const percFormatted = `${percSign}${totals.marginePercentuale}%`;
 
   // Row 1: CANTIERE: [Nome] | DITTA: [Nome Ditta]
   const row1 = ws.addRow(['CANTIERE:', nomeCantiere, '', '', 'DITTA:', finalDitta]);
@@ -127,44 +137,109 @@ export function buildCantiereDetailSheet(
   row3.height = 24;
   ws.mergeCells('B3:D3');
 
-  // Style Header rows 1-3
-  for (let r = 1; r <= 3; r++) {
-    // Left label (col A)
-    const cellA = ws.getCell(`A${r}`);
-    cellA.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
-    cellA.alignment = { vertical: 'middle', horizontal: 'center' };
-    cellA.border = thinBlackBorder;
-    cellA.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+  // Row 4: % UTILE / MARGINE IN EVIDENZA IN ALTO
+  const row4 = ws.addRow(['% UTILE CANTIERE:', percFormatted, '', '', 'UTILE EFFETTIVO:', totals.margineEffettivo]);
+  row4.height = 25;
+  ws.mergeCells('B4:D4');
 
-    // Left value (col B:D)
-    const cellB = ws.getCell(`B${r}`);
-    cellB.font = { name: 'Calibri', size: 10, bold: true };
-    // Committente in row 3 is centered as requested
-    cellB.alignment = { vertical: 'middle', horizontal: r === 3 ? 'center' : 'left' };
-    cellB.border = thinBlackBorder;
-    ws.getCell(`C${r}`).border = thinBlackBorder;
-    ws.getCell(`D${r}`).border = thinBlackBorder;
-
-    // Right label (col E)
-    const cellE = ws.getCell(`E${r}`);
-    cellE.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
-    cellE.alignment = { vertical: 'middle', horizontal: 'center' };
-    cellE.border = thinBlackBorder;
-    cellE.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
-
-    // Right value (col F)
-    const cellF = ws.getCell(`F${r}`);
-    cellF.font = { name: 'Calibri', size: 11, bold: true };
-    cellF.alignment = { vertical: 'middle', horizontal: 'center' };
-    cellF.border = thinBlackBorder;
+  // Style Header rows 1-4: TUTTO IL TESTO PERFETTAMENTE CENTRATO
+  // Sia nelle etichette (A, E) che nei valori e blocchi uniti (B, C, D, F)
+  for (let r = 1; r <= 4; r++) {
+    for (const col of ['A', 'B', 'C', 'D', 'E', 'F']) {
+      const cell = ws.getCell(`${col}${r}`);
+      cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      cell.border = thinBlackBorder;
+    }
   }
 
-  // Row 4: Blank separator
-  const blankRow4 = ws.addRow(['', '', '', '', '', '']);
-  blankRow4.height = 10;
+  // Stile specifico per righe 1-3
+  for (let r = 1; r <= 3; r++) {
+    // Col A (etichette sinistra: CANTIERE, CITTA', DEL)
+    const cellA = ws.getCell(`A${r}`);
+    cellA.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
+    cellA.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+
+    // Col B, C, D (valori sinistra: Nome cantiere, Indirizzo, Committente)
+    for (const c of ['B', 'C', 'D']) {
+      const cell = ws.getCell(`${c}${r}`);
+      cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
+    }
+
+    // Col E (etichette destra: DITTA, ANNO, DATA)
+    const cellE = ws.getCell(`E${r}`);
+    cellE.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
+    cellE.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+
+    // Col F (valori destra: Nome Ditta, Anno, Data)
+    const cellF = ws.getCell(`F${r}`);
+    cellF.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FF000000' } };
+  }
+
+  // Stile specifico per riga 4 (% Utile e Utile Effettivo ben visibili e centrati)
+  const cellA4 = ws.getCell('A4');
+  cellA4.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
+  cellA4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+
+  for (const c of ['B', 'C', 'D']) {
+    const cell = ws.getCell(`${c}4`);
+    cell.font = {
+      name: 'Calibri',
+      size: 13,
+      bold: true,
+      color: { argb: totals.isPositive ? 'FF047857' : 'FFBE123C' },
+    };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: totals.isPositive ? 'FFE8F5E9' : 'FFFFEBEE' },
+    };
+  }
+
+  const cellE4 = ws.getCell('E4');
+  cellE4.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF000000' } };
+  cellE4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F2F2' } };
+
+  const cellF4 = ws.getCell('F4');
+  cellF4.font = {
+    name: 'Calibri',
+    size: 11,
+    bold: true,
+    color: { argb: totals.isPositive ? 'FF047857' : 'FFBE123C' },
+  };
+  cellF4.numFmt = currencyFormat;
+  cellF4.fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: totals.isPositive ? 'FFE8F5E9' : 'FFFFEBEE' },
+  };
+
+  // APPLICAZIONE FINALE ED ESPLICITA DI HORIZONTAL: 'CENTER' SULLE CELLE MASTER E SU TUTTO IL BLOCCO
+  // Eseguita come ultimissima operazione del blocco testata affinché Excel / ExcelJS non la sovrascriva
+  for (let r = 1; r <= 4; r++) {
+    for (const col of ['A', 'B', 'C', 'D', 'E', 'F']) {
+      const cell = ws.getCell(`${col}${r}`);
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: 'center',
+        wrapText: true,
+      };
+    }
+  }
+  // Forzatura specifica sulle celle master dei merge B1:D1, B2:D2, B3:D3, B4:D4
+  ['B1', 'B2', 'B3', 'B4'].forEach((cellRef) => {
+    ws.getCell(cellRef).alignment = {
+      vertical: 'middle',
+      horizontal: 'center',
+      wrapText: true,
+    };
+  });
+
+  // Row 5: Blank separator
+  const blankRow5 = ws.addRow(['', '', '', '', '', '']);
+  blankRow5.height = 10;
 
   // -------------------------------------------------------------
-  // TABLE HEADERS (Row 5)
+  // TABLE HEADERS (Row 6)
   // DATA DOC. | N° DOC. | TIPO DOC. / FORNITORE / CLIENTE | N./PROT | ACQUISTI | EMESSE
   // -------------------------------------------------------------
   const tableHeaderRow = ws.addRow([
@@ -184,7 +259,7 @@ export function buildCantiereDetailSheet(
   });
 
   // -------------------------------------------------------------
-  // ROW 6: RIMANENZE INIZIALI (R.I.)
+  // ROW 7: RIMANENZE INIZIALI (R.I.)
   // -------------------------------------------------------------
   const ri = Number(cantiere.initialInventory) || 0;
   const riRow = ws.addRow([
@@ -210,51 +285,53 @@ export function buildCantiereDetailSheet(
   const riRowNum = riRow.number;
 
   // -------------------------------------------------------------
-  // MOVEMENTS ROWS
-  // -------------------------------------------------------------
-  const startMovRow = 7;
-  const movements = cantiere.movements || [];
+  // MOVEMENTS ROWS (ALMENO 37 RIGHE TOTALI, PROTETTO DA VALORI INDEFINITI O VUOTI)
+  const startMovRow = 8;
+  const movements = Array.isArray(cantiere?.movements) ? cantiere.movements : [];
+  const actualCount = movements.length;
 
   for (const mov of movements) {
     const row = ws.addRow([
-      formatDateItalian(mov.date),
-      mov.docNumber || '',
-      mov.typeAndSubject || '',
-      mov.protocol || '',
-      Number(mov.purchases) || 0,
-      Number(mov.issued) || 0,
+      formatDateItalian(mov?.date),
+      mov?.docNumber || '',
+      mov?.typeAndSubject || '',
+      mov?.protocol || '',
+      Number(mov?.purchases) || 0,
+      Number(mov?.issued) || 0,
     ]);
     row.height = 20;
-    row.eachCell((cell, colNum) => {
+    for (let c = 1; c <= 6; c++) {
+      const cell = row.getCell(c);
       cell.border = thinBlackBorder;
       cell.font = { name: 'Calibri', size: 10 };
-      if (colNum === 1 || colNum === 2 || colNum === 4) {
-        // Centered dates, document numbers, protocol
+      if (c === 1 || c === 2 || c === 4) {
         cell.alignment = { vertical: 'middle', horizontal: 'center' };
-      } else if (colNum === 3) {
-        // Left-aligned type / supplier / description
+      } else if (c === 3) {
         cell.alignment = { vertical: 'middle', horizontal: 'left' };
       } else {
-        // Right-aligned currency
         cell.numFmt = currencyFormat;
         cell.alignment = { vertical: 'middle', horizontal: 'right' };
       }
-    });
+    }
   }
 
-  // Ensure minimum empty rows to fill the full A4 page when there are few movements
-  const minRows = Math.max(movements.length, 16);
-  for (let i = movements.length; i < minRows; i++) {
-    const emptyRow = ws.addRow(['', '', '', '', 0, 0]);
+  // Riempimento celle vuote per avere SEMPRE ALMENO 37 righe fisse nella tabella
+  // Se actualCount >= 37, il ciclo non fa nulla e lascia i dati reali intatti
+  for (let i = actualCount; i < 37; i++) {
+    const emptyRow = ws.addRow(['', '', '', '', '', '']);
     emptyRow.height = 20;
-    emptyRow.eachCell((cell, colNum) => {
+    for (let c = 1; c <= 6; c++) {
+      const cell = emptyRow.getCell(c);
+      cell.value = '';
       cell.border = thinBlackBorder;
       cell.font = { name: 'Calibri', size: 10 };
-      if (colNum >= 5) {
+      if (c >= 5) {
         cell.numFmt = currencyFormat;
         cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      } else {
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
       }
-    });
+    }
   }
 
   const lastMovRowNum = ws.rowCount;
@@ -263,31 +340,28 @@ export function buildCantiereDetailSheet(
   // RIGHE TOTALI FINALI:
   // Riga 1: Totale senza RI (somma acquisti e vendite emesse dell'anno)
   // Riga 2: Totale comprensivo di RI (somma totale inclusa rimanenza iniziale)
+  // Celle da A a D unite, allineate a sinistra (indentate) con bordi coerenti
   // -------------------------------------------------------------
-  const doubleTopBorder: Partial<ExcelJS.Borders> = {
-    top: { style: 'double', color: { argb: 'FF000000' } },
-    left: { style: 'thin', color: { argb: 'FF000000' } },
-    bottom: { style: 'thin', color: { argb: 'FF000000' } },
-    right: { style: 'thin', color: { argb: 'FF000000' } },
-  };
-
   // Row: Totale senza RI
   const totSenzaRIRow = ws.addRow([
-    '',
-    '',
-    '',
     'Totale senza RI',
+    '',
+    '',
+    '',
     { formula: `SUM(E${startMovRow}:E${lastMovRowNum})` },
     { formula: `SUM(F${startMovRow}:F${lastMovRowNum})` }
   ]);
   totSenzaRIRow.height = 24;
+  const totSenzaRIRowNum = totSenzaRIRow.number;
+  ws.mergeCells(`A${totSenzaRIRowNum}:D${totSenzaRIRowNum}`);
 
-  totSenzaRIRow.eachCell((cell, colNum) => {
-    cell.border = doubleTopBorder;
-    if (colNum === 4) {
+  for (let c = 1; c <= 6; c++) {
+    const cell = totSenzaRIRow.getCell(c);
+    cell.border = thinBlackBorder;
+    if (c <= 4) {
       cell.font = { name: 'Calibri', size: 10, bold: true };
-      cell.alignment = { vertical: 'middle', horizontal: 'right' };
-    } else if (colNum >= 5) {
+      cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    } else {
       cell.font = { name: 'Calibri', size: 10, bold: true };
       cell.numFmt = currencyFormat;
       cell.alignment = { vertical: 'middle', horizontal: 'right' };
@@ -297,26 +371,28 @@ export function buildCantiereDetailSheet(
         fgColor: { argb: 'FFF2F2F2' }
       };
     }
-  });
-  const totSenzaRIRowNum = totSenzaRIRow.number;
+  }
 
   // Row: Totale comprensivo di RI
   const totCompRIRow = ws.addRow([
-    '',
-    '',
-    '',
     'Totale comprensivo di RI',
+    '',
+    '',
+    '',
     { formula: `E${totSenzaRIRowNum}+E${riRowNum}` },
     { formula: `F${totSenzaRIRowNum}` }
   ]);
   totCompRIRow.height = 24;
+  const totCompRIRowNum = totCompRIRow.number;
+  ws.mergeCells(`A${totCompRIRowNum}:D${totCompRIRowNum}`);
 
-  totCompRIRow.eachCell((cell, colNum) => {
-    cell.border = mediumBlackBorder;
-    if (colNum === 4) {
+  for (let c = 1; c <= 6; c++) {
+    const cell = totCompRIRow.getCell(c);
+    cell.border = thinBlackBorder;
+    if (c <= 4) {
       cell.font = { name: 'Calibri', size: 10, bold: true };
-      cell.alignment = { vertical: 'middle', horizontal: 'right' };
-    } else if (colNum >= 5) {
+      cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    } else {
       cell.font = { name: 'Calibri', size: 11, bold: true };
       cell.numFmt = currencyFormat;
       cell.alignment = { vertical: 'middle', horizontal: 'right' };
@@ -326,7 +402,7 @@ export function buildCantiereDetailSheet(
         fgColor: { argb: 'FFE6E6E6' }
       };
     }
-  });
+  }
 
   return ws;
 }
@@ -349,7 +425,7 @@ export function createProspettoSheet(
   });
 
   // Column definitions matching guidelines:
-  // NOME CLIENTE | CITTA' | INDIRIZZO | R.I. | ACQUISTI | EMESSE | R.F.
+  // NOME CLIENTE | CITTA' | INDIRIZZO | R.I. | ACQUISTI | EMESSE | R.F. | % UTILE
   ws.columns = [
     { key: 'colA', width: 34 }, // NOME CLIENTE
     { key: 'colB', width: 22 }, // CITTA'
@@ -358,15 +434,16 @@ export function createProspettoSheet(
     { key: 'colE', width: 16 }, // ACQUISTI
     { key: 'colF', width: 16 }, // EMESSE
     { key: 'colG', width: 16 }, // R.F.
+    { key: 'colH', width: 15 }, // % UTILE
   ];
 
   // -------------------------------------------------------------
   // HEADER DITTA (Row 1-2)
   // -------------------------------------------------------------
   const dittaName = (artigiano.name || 'IMPRESA').toUpperCase();
-  const rowDitta = ws.addRow([`DITTA: ${dittaName}`, '', '', '', '', '', '']);
+  const rowDitta = ws.addRow([`DITTA: ${dittaName}`, '', '', '', '', '', '', '']);
   rowDitta.height = 26;
-  ws.mergeCells(`A1:G1`);
+  ws.mergeCells(`A1:H1`);
   const cellDittaHeader = ws.getCell('A1');
   cellDittaHeader.font = { name: 'Calibri', size: 13, bold: true, color: { argb: 'FF000000' } };
   cellDittaHeader.alignment = { vertical: 'middle', horizontal: 'left' };
@@ -377,9 +454,9 @@ export function createProspettoSheet(
   const anno = artigiano.year || 2026;
   const dataAggiornataText = (dataAggiornamento || dataStampa).trim();
 
-  const rowSub = ws.addRow(['', '', '', '', '', '', '']);
+  const rowSub = ws.addRow(['', '', '', '', '', '', '', '']);
   rowSub.height = 20;
-  ws.mergeCells(`A2:G2`);
+  ws.mergeCells(`A2:H2`);
   const cellSub = ws.getCell('A2');
   cellSub.value = {
     richText: [
@@ -396,12 +473,12 @@ export function createProspettoSheet(
   cellSub.alignment = { vertical: 'middle', horizontal: 'left' };
 
   // Blank row 3
-  const sepRow3 = ws.addRow(['', '', '', '', '', '', '']);
+  const sepRow3 = ws.addRow(['', '', '', '', '', '', '', '']);
   sepRow3.height = 8;
 
   // -------------------------------------------------------------
   // TABELLA PRINCIPALE CANTIERI (Row 4)
-  // Colonne: NOME CLIENTE | CITTA' | INDIRIZZO | R.I. | ACQUISTI | EMESSE | R.F.
+  // Colonne: NOME CLIENTE | CITTA' | INDIRIZZO | R.I. | ACQUISTI | EMESSE | R.F. | % UTILE
   // -------------------------------------------------------------
   const headerRow = ws.addRow([
     'NOME CLIENTE',
@@ -410,7 +487,8 @@ export function createProspettoSheet(
     'R.I.',
     'ACQUISTI',
     'EMESSE',
-    'R.F.'
+    'R.F.',
+    '% UTILE'
   ]);
   headerRow.height = 24;
   headerRow.eachCell((cell, colNum) => {
@@ -419,7 +497,7 @@ export function createProspettoSheet(
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAEAEA' } };
     cell.alignment = {
       vertical: 'middle',
-      horizontal: colNum <= 3 ? 'left' : 'right'
+      horizontal: colNum <= 3 ? 'left' : colNum === 8 ? 'center' : 'right'
     };
   });
 
@@ -454,15 +532,24 @@ export function createProspettoSheet(
       ri,
       acq,
       eme,
-      rf
+      rf,
+      `${t.marginePercentuale}%`
     ]);
     row.height = 20;
 
     row.eachCell((cell, colNum) => {
       cell.border = thinBlackBorder;
-      cell.font = { name: 'Calibri', size: 10, bold: colNum === 1 };
+      cell.font = { name: 'Calibri', size: 10, bold: colNum === 1 || colNum === 8 };
       if (colNum <= 3) {
         cell.alignment = { vertical: 'middle', horizontal: 'left' };
+      } else if (colNum === 8) {
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.font = {
+          name: 'Calibri',
+          size: 10,
+          bold: true,
+          color: { argb: t.isPositive ? 'FF047857' : 'FFBE123C' }
+        };
       } else {
         cell.numFmt = currencyFormat;
         cell.alignment = { vertical: 'middle', horizontal: 'right' };
@@ -473,11 +560,11 @@ export function createProspettoSheet(
   // Ensure minimum rows
   const minRows = Math.max(cantieri.length, 2);
   for (let i = cantieri.length; i < minRows; i++) {
-    const emptyRow = ws.addRow(['', '', '', 0, 0, 0, 0]);
+    const emptyRow = ws.addRow(['', '', '', 0, 0, 0, 0, '']);
     emptyRow.height = 20;
     emptyRow.eachCell((cell, colNum) => {
       cell.border = thinBlackBorder;
-      if (colNum >= 4) {
+      if (colNum >= 4 && colNum <= 7) {
         cell.numFmt = currencyFormat;
         cell.alignment = { vertical: 'middle', horizontal: 'right' };
       }
@@ -498,7 +585,8 @@ export function createProspettoSheet(
     0,
     totSospesi,
     0,
-    0
+    0,
+    '-'
   ]);
   sospesiRow.height = 21;
 
@@ -510,6 +598,9 @@ export function createProspettoSheet(
     } else if (colNum <= 3) {
       cell.font = { name: 'Calibri', size: 10, italic: true };
       cell.alignment = { vertical: 'middle', horizontal: 'left' };
+    } else if (colNum === 8) {
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.font = { name: 'Calibri', size: 10, color: { argb: 'FF666666' } };
     } else {
       cell.numFmt = currencyFormat;
       cell.font = { name: 'Calibri', size: 10, bold: colNum === 5 };
@@ -522,8 +613,9 @@ export function createProspettoSheet(
   // -------------------------------------------------------------
   // RIGA TOTALI CANTIERI + SOSPESI
   // Riga in grassetto con bordo marcato riportante TOTALI e la somma
-  // delle colonne R.I., ACQUISTI (cantieri + sospesi), EMESSE e R.F.
+  // delle colonne R.I., ACQUISTI (cantieri + sospesi), EMESSE e R.F. e % UTILE complessivo
   // -------------------------------------------------------------
+  const artTotals = calculateArtigianoTotals(artigiano);
   const totaliRow = ws.addRow([
     '',
     '',
@@ -532,6 +624,7 @@ export function createProspettoSheet(
     { formula: `SUM(E${startDataRow}:E${lastTableDataRowNum})` },
     { formula: `SUM(F${startDataRow}:F${lastTableDataRowNum})` },
     { formula: `SUM(G${startDataRow}:G${lastTableDataRowNum})` },
+    `${artTotals.marginePercentuale}%`
   ]);
   totaliRow.height = 24;
   const totaliRowNum = totaliRow.number;
@@ -541,9 +634,22 @@ export function createProspettoSheet(
     cell.font = { name: 'Calibri', size: 10, bold: true };
     if (colNum === 3) {
       cell.alignment = { vertical: 'middle', horizontal: 'right' };
-    } else if (colNum >= 4) {
+    } else if (colNum >= 4 && colNum <= 7) {
       cell.numFmt = currencyFormat;
       cell.alignment = { vertical: 'middle', horizontal: 'right' };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFF2F2F2' }
+      };
+    } else if (colNum === 8) {
+      cell.alignment = { vertical: 'middle', horizontal: 'center' };
+      cell.font = {
+        name: 'Calibri',
+        size: 11,
+        bold: true,
+        color: { argb: artTotals.marginePercentuale >= 0 ? 'FF047857' : 'FFBE123C' }
+      };
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
@@ -1036,15 +1142,20 @@ export function buildCantiereWorksheet(cantiere: Cantiere, artigianoName?: strin
       Number(mov.issued) || 0,
     ]);
   }
+  const movLen = (cantiere.movements || []).length;
+  for (let i = movLen; i < 37; i++) {
+    rows.push(['', '', '', '', '', '']);
+  }
   rows.push(['', '', '', 'Totale senza RI', totals.totaleAcquisti, 0]);
   rows.push(['', '', '', 'Totale comprensivo di RI', totals.totaleAcquistiConRI, totals.totaleEmesse]);
+  rows.push(['', '', '', 'Utile Effettivo', totals.margineEffettivo, `${totals.marginePercentuale}%`]);
   const ws = XLSX.utils.aoa_to_sheet(rows);
   return ws;
 }
 
 export function buildProspettoGeneraleWorksheet(artigiano: Artigiano): XLSX.WorkSheet {
   const rows: (string | number)[][] = [
-    ['NOME CLIENTE', 'CITTA\'', 'INDIRIZZO', 'R.I.', 'ACQUISTI', 'EMESSE', 'R.F.'],
+    ['NOME CLIENTE', 'CITTA\'', 'INDIRIZZO', 'R.I.', 'ACQUISTI', 'EMESSE', 'R.F.', '% UTILE'],
   ];
   for (const c of artigiano.cantieri || []) {
     const t = calculateCantiereTotals(c);
@@ -1060,6 +1171,7 @@ export function buildProspettoGeneraleWorksheet(artigiano: Artigiano): XLSX.Work
       acq > 0 ? acq : ' - €',
       eme > 0 ? eme : ' - €',
       rf > 0 ? rf : ' - €',
+      `${t.marginePercentuale}%`,
     ]);
   }
   const ws = XLSX.utils.aoa_to_sheet(rows);

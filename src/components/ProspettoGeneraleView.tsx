@@ -43,6 +43,7 @@ import {
 import {
   exportAllCantieriPdfZip,
   getCantiereFileName,
+  exportProspettoGeneralePdf,
 } from '../utils/pdfExport';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -107,13 +108,15 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
     setIsDateExportModalOpen(true);
   };
 
-  const handleConfirmDateExport = (forcedMode?: 'excel' | 'pdf') => {
+  const handleConfirmDateExport = (forcedMode?: 'excel' | 'pdf' | 'direct_pdf') => {
     const mode = forcedMode || pendingExportMode;
     const dateToUse = (dataAggiornamentoInput || new Date().toLocaleDateString('it-IT')).trim();
     setIsDateExportModalOpen(false);
 
     if (mode === 'excel') {
       exportProspettoGeneraleExcel(artigiano, undefined, undefined, dateToUse);
+    } else if (mode === 'direct_pdf') {
+      exportProspettoGeneralePdf(artigiano, dateToUse);
     } else {
       onPrintProspetto(dateToUse);
     }
@@ -1708,11 +1711,21 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
                     </button>
                     <button
                       type="button"
+                      onClick={() => handleConfirmDateExport('direct_pdf')}
+                      className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+                      title="Scarica direttamente il file PDF (.pdf) formattato come il foglio XLS"
+                    >
+                      <Download className="h-4 w-4" />
+                      <span>Scarica PDF (.pdf)</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => handleConfirmDateExport('pdf')}
                       className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-extrabold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+                      title="Apri report per visualizzazione e stampa a tutta pagina"
                     >
                       <Printer className="h-4 w-4" />
-                      <span>Conferma e Apri Stampa / PDF</span>
+                      <span>Stampa / Anteprima PDF</span>
                     </button>
                   </>
                 )}
