@@ -57,8 +57,8 @@ interface SchedaCantiereViewProps {
     linkedCantiereIds: string[],
     linkedSospesiIds: string[]
   ) => void;
-  onMoveToSospesi?: (movement: Movement) => void;
-  onMoveToOtherCantiere?: (sourceCantiereId: string, targetCantiereId: string, movement: Movement) => void;
+  onMoveToSospesi?: (movement: Movement, partialAmount?: number) => void;
+  onMoveToOtherCantiere?: (sourceCantiereId: string, targetCantiereId: string, movement: Movement, partialAmount?: number) => void;
   onDeleteCantiere?: (cantiereId: string) => void;
   onOpenXmlImport: () => void;
   onOpenExcelImport?: () => void;
@@ -120,6 +120,10 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
   const [deleteModalStep, setDeleteModalStep] = useState<
     'choose_action' | 'confirm_move_sospesi' | 'confirm_move_cantiere' | 'confirm_permanent_delete'
   >('choose_action');
+
+  // Amount mode for moving movement: full or partial
+  const [moveAmountMode, setMoveAmountMode] = useState<'full' | 'partial'>('full');
+  const [partialAmountInput, setPartialAmountInput] = useState<string>('');
 
   // Support creating new cantiere on the fly from the action modal
   const [localExtraCantieri, setLocalExtraCantieri] = useState<Cantiere[]>([]);
@@ -359,6 +363,8 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
       setTargetMoveCantiereId('');
     }
 
+    setMoveAmountMode('full');
+    setPartialAmountInput('');
     setDeleteModalStep('choose_action');
     setMovementActionData({
       movement: mov,
@@ -369,28 +375,74 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
   const handleConfirmMoveToSospesi = () => {
     if (!movementActionData) return;
     const mov = movementActionData.movement;
+    const totalAmt = Math.round((mov.purchases || mov.issued || 0) * 100) / 100;
+    const parsedPartial = parseFloat(partialAmountInput.replace(',', '.')) || 0;
+    const isPartial = moveAmountMode === 'partial' && parsedPartial > 0 && parsedPartial < totalAmt;
+    const moveAmt = isPartial ? Math.round(parsedPartial * 100) / 100 : totalAmt;
+    const remainingAmt = Math.round((totalAmt - moveAmt) * 100) / 100;
+
     if (onMoveToSospesi) {
-      onMoveToSospesi(mov);
+      onMoveToSospesi(mov, isPartial ? moveAmt : undefined);
+    } else {
+      // Local fallback
+      if (isPartial) {
+        onUpdateCantiere({
+          ...cantiere,
+          movements: cantiere.movements.map((m) =>
+            m.id === mov.id
+              ? {
+                  ...m,
+                  purchases: m.purchases !== 0 ? remainingAmt : 0,
+                  issued: m.issued !== 0 ? remainingAmt : 0,
+                }
+              : m
+          ),
+          updatedAt: new Date().toISOString(),
+        });
+      } else {
+        onUpdateCantiere({
+          ...cantiere,
+          movements: cantiere.movements.filter((m) => m.id !== mov.id),
+          updatedAt: new Date().toISOString(),
+        });
+      }
     }
-    onUpdateCantiere({
-      ...cantiere,
-      movements: cantiere.movements.filter((m) => m.id !== mov.id),
-      updatedAt: new Date().toISOString(),
-    });
     setMovementActionData(null);
   };
 
   const handleConfirmMoveToOtherCantiere = () => {
     if (!movementActionData || !targetMoveCantiereId) return;
     const mov = movementActionData.movement;
+    const totalAmt = Math.round((mov.purchases || mov.issued || 0) * 100) / 100;
+    const parsedPartial = parseFloat(partialAmountInput.replace(',', '.')) || 0;
+    const isPartial = moveAmountMode === 'partial' && parsedPartial > 0 && parsedPartial < totalAmt;
+    const moveAmt = isPartial ? Math.round(parsedPartial * 100) / 100 : totalAmt;
+    const remainingAmt = Math.round((totalAmt - moveAmt) * 100) / 100;
+
     if (onMoveToOtherCantiere) {
-      onMoveToOtherCantiere(cantiere.id, targetMoveCantiereId, mov);
+      onMoveToOtherCantiere(cantiere.id, targetMoveCantiereId, mov, isPartial ? moveAmt : undefined);
     } else {
-      onUpdateCantiere({
-        ...cantiere,
-        movements: cantiere.movements.filter((m) => m.id !== mov.id),
-        updatedAt: new Date().toISOString(),
-      });
+      if (isPartial) {
+        onUpdateCantiere({
+          ...cantiere,
+          movements: cantiere.movements.map((m) =>
+            m.id === mov.id
+              ? {
+                  ...m,
+                  purchases: m.purchases !== 0 ? remainingAmt : 0,
+                  issued: m.issued !== 0 ? remainingAmt : 0,
+                }
+              : m
+          ),
+          updatedAt: new Date().toISOString(),
+        });
+      } else {
+        onUpdateCantiere({
+          ...cantiere,
+          movements: cantiere.movements.filter((m) => m.id !== mov.id),
+          updatedAt: new Date().toISOString(),
+        });
+      }
     }
     setMovementActionData(null);
   };
@@ -1517,6 +1569,8 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                                   allCantieri,
                                   sospesi
                                 );
+                                setMoveAmountMode('full');
+                                setPartialAmountInput('');
                                 setDeleteModalStep('confirm_move_sospesi');
                                 setMovementActionData({
                                   movement: m,
@@ -1842,81 +1896,216 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
               </div>
             )}
 
-            {/* STEP 2A: CONFIRM MOVE TO SOSPESI (WITH CLEAN NOTES REMINDER) */}
-            {deleteModalStep === 'confirm_move_sospesi' && (
-              <div className="space-y-4 pt-1 animate-fadeIn">
-                <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/40 space-y-2">
-                  <div className="flex items-center gap-2 text-amber-300 font-bold text-xs uppercase tracking-wider">
-                    <Layers className="h-4 w-4 text-amber-400 shrink-0" />
-                    <span>Destinazione: Scheda Sospesi ({artigianoName || 'Artigiano'})</span>
+            {/* STEP 2A: CONFIRM MOVE TO SOSPESI (WITH CLEAN NOTES REMINDER & FULL/PARTIAL CHOICE) */}
+            {deleteModalStep === 'confirm_move_sospesi' && (() => {
+              const mov = movementActionData.movement;
+              const totalAmt = Math.round((mov.purchases || mov.issued || 0) * 100) / 100;
+              const parsedPartial = parseFloat(partialAmountInput.replace(',', '.')) || 0;
+              const isValidPartial = parsedPartial > 0 && parsedPartial < totalAmt;
+              const isInvalidPartial = moveAmountMode === 'partial' && !isValidPartial;
+              const moveAmt = moveAmountMode === 'partial' && isValidPartial ? Math.round(parsedPartial * 100) / 100 : totalAmt;
+              const remainingAmt = Math.round((totalAmt - moveAmt) * 100) / 100;
+
+              return (
+                <div className="space-y-4 pt-1 animate-fadeIn">
+                  <div className="p-3.5 rounded-xl bg-amber-950/40 border border-amber-500/40 space-y-2">
+                    <div className="flex items-center gap-2 text-amber-300 font-bold text-xs uppercase tracking-wider">
+                      <Layers className="h-4 w-4 text-amber-400 shrink-0" />
+                      <span>Destinazione: Scheda Sospesi ({artigianoName || 'Artigiano'})</span>
+                    </div>
+                    <div className="bg-slate-900/90 p-3 rounded-lg border border-amber-500/30 space-y-1.5 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 font-bold uppercase">Documento:</span>
+                        <span className="text-white font-bold">{mov.docNumber}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 font-bold uppercase">Data:</span>
+                        <span className="text-slate-200 font-mono">{formatDateItalian(mov.date)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 font-bold uppercase">Fornitore / Tipo Doc:</span>
+                        <span className="text-slate-100 font-medium">{mov.typeAndSubject}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 font-bold uppercase">N./PROT:</span>
+                        <span className="text-slate-200 font-mono">{mov.protocol || '-'}</span>
+                      </div>
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-800">
+                        <span className="text-slate-400 font-bold uppercase">Importo Originale Riga:</span>
+                        <span className="text-rose-400 font-mono font-bold text-sm">
+                          {formatCurrency(totalAmt)}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="bg-slate-900/90 p-3 rounded-lg border border-amber-500/30 space-y-1.5 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 font-bold uppercase">Documento:</span>
-                      <span className="text-white font-bold">{movementActionData.movement.docNumber}</span>
+
+                  {/* Scelta Quota: Intero importo o Importo Parziale */}
+                  <div className="bg-slate-950/70 p-3.5 rounded-xl border border-slate-800 space-y-2.5">
+                    <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider">
+                      Quanto desideri spostare nei Sospesi?
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setMoveAmountMode('full')}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                          moveAmountMode === 'full'
+                            ? 'bg-amber-500/20 border-amber-500 text-white font-bold ring-1 ring-amber-500/50'
+                            : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold">Intero Importo</span>
+                          <span className="font-mono font-bold text-amber-300">{formatCurrency(totalAmt)}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-normal">
+                          Rimuove completamente la riga da questo cantiere.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMoveAmountMode('partial');
+                          if (!partialAmountInput) {
+                            setPartialAmountInput((totalAmt / 2).toFixed(2));
+                          }
+                        }}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                          moveAmountMode === 'partial'
+                            ? 'bg-amber-500/20 border-amber-500 text-white font-bold ring-1 ring-amber-500/50'
+                            : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold">Solo una Parte (Parziale)</span>
+                          <span className="text-[10px] uppercase font-bold text-amber-400">Personalizzato</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-normal">
+                          Sposta una quota; il resto resta in questo cantiere.
+                        </p>
+                      </button>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 font-bold uppercase">Data:</span>
-                      <span className="text-slate-200 font-mono">{formatDateItalian(movementActionData.movement.date)}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 font-bold uppercase">Fornitore / Tipo Doc:</span>
-                      <span className="text-slate-100 font-medium">{movementActionData.movement.typeAndSubject}</span>
-                    </div>
-                    <div className="flex items-center justify-between pt-1 border-t border-slate-800">
-                      <span className="text-slate-400 font-bold uppercase">Importo Spostato:</span>
-                      <span className="text-rose-400 font-mono font-bold text-sm">
-                        {formatCurrency(movementActionData.movement.purchases || movementActionData.movement.issued)}
+
+                    {moveAmountMode === 'partial' && (
+                      <div className="pt-1.5 space-y-2 animate-fadeIn">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                            Inserisci la parte di importo da spostare nei Sospesi (€):
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-2 text-slate-400 font-mono font-bold">€</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              max={totalAmt}
+                              value={partialAmountInput}
+                              onChange={(e) => setPartialAmountInput(e.target.value)}
+                              className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-amber-500/60 rounded-lg text-sm font-bold font-mono text-white focus:outline-none focus:ring-1 focus:ring-amber-400"
+                              placeholder="0.00"
+                              autoFocus
+                            />
+                          </div>
+                          {parsedPartial <= 0 && (
+                            <p className="text-[10px] text-rose-400 mt-1">
+                              Inserisci una quota positiva superiore a 0.
+                            </p>
+                          )}
+                          {parsedPartial >= totalAmt && (
+                            <p className="text-[10px] text-amber-400 mt-1">
+                              La quota parziale deve essere inferiore al totale (€ {totalAmt.toFixed(2)}). Se desideri spostare tutto, seleziona "Intero Importo".
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Ripartizione live */}
+                        <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                          <div className="bg-slate-900/90 p-2.5 rounded-lg border border-amber-500/30">
+                            <span className="block text-[10px] uppercase text-slate-400 font-bold">Trasferito nei Sospesi:</span>
+                            <span className="font-mono font-bold text-amber-300 text-sm">
+                              {formatCurrency(isValidPartial ? parsedPartial : 0)}
+                            </span>
+                            <span className="block text-[10px] text-slate-400 mt-0.5">
+                              Stessa data, doc, fornitore e protocollo
+                            </span>
+                          </div>
+                          <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
+                            <span className="block text-[10px] uppercase text-slate-400 font-bold">Rimanenza in cantiere:</span>
+                            <span className="font-mono font-bold text-slate-200 text-sm">
+                              {formatCurrency(isValidPartial ? remainingAmt : totalAmt)}
+                            </span>
+                            <span className="block text-[10px] text-slate-400 mt-0.5">
+                              Resta in {cantiere.name}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="text-xs text-slate-300 bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1.5">
+                    <p className="font-semibold text-amber-300 flex items-center gap-1.5">
+                      <AlertCircle className="h-4 w-4 text-amber-400" />
+                      <span>Verifica dello spostamento nei Sospesi:</span>
+                    </p>
+                    <p className="text-slate-400 leading-relaxed">
+                      • Nei Sospesi andranno a finire la <strong className="text-white">stessa data</strong>, lo <strong className="text-white">stesso n° doc</strong>, lo <strong className="text-white">stesso fornitore</strong> e lo <strong className="text-white">stesso N./PROT</strong>.<br />
+                      • I campi <strong>Nota Interna</strong> (non stampata) e <strong>Nota per il Cliente</strong> (stampata) rimarranno <strong>completamente vuoti</strong>.<br />
+                      {moveAmountMode === 'partial' ? (
+                        <span>• In questo cantiere (<strong className="text-white">{cantiere.name}</strong>) rimarrà la rimanenza di <strong className="text-white">{formatCurrency(remainingAmt)}</strong>.</span>
+                      ) : (
+                        <span>• La riga verrà rimossa completamente da questo cantiere.</span>
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setDeleteModalStep('choose_action')}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+                    >
+                      ← Torna Indietro (Annulla)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmMoveToSospesi}
+                      disabled={isInvalidPartial}
+                      className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 text-xs font-bold rounded-xl cursor-pointer transition-colors shadow-lg inline-flex items-center gap-1.5"
+                    >
+                      <CheckCircle className="h-4 w-4" />
+                      <span>
+                        {moveAmountMode === 'partial'
+                          ? `Conferma Spostamento Quota (€ ${isValidPartial ? parsedPartial.toFixed(2) : '0.00'}) nei Sospesi`
+                          : 'Conferma Spostamento Intero nei Sospesi'}
                       </span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* STEP 2B: CONFIRM MOVE TO ANOTHER CANTIERE (CLEAR TARGET DETAILS & FULL/PARTIAL CHOICE) */}
+            {deleteModalStep === 'confirm_move_cantiere' && (() => {
+              const mov = movementActionData.movement;
+              const totalAmt = Math.round((mov.purchases || mov.issued || 0) * 100) / 100;
+              const parsedPartial = parseFloat(partialAmountInput.replace(',', '.')) || 0;
+              const isValidPartial = parsedPartial > 0 && parsedPartial < totalAmt;
+              const isInvalidPartial = moveAmountMode === 'partial' && !isValidPartial;
+              const moveAmt = moveAmountMode === 'partial' && isValidPartial ? Math.round(parsedPartial * 100) / 100 : totalAmt;
+              const remainingAmt = Math.round((totalAmt - moveAmt) * 100) / 100;
+              const targetC = mergedCantieri.find((c) => c.id === targetMoveCantiereId);
+
+              return (
+                <div className="space-y-4 pt-1 animate-fadeIn">
+                  <div className="p-3.5 rounded-xl bg-blue-950/40 border border-blue-500/40 space-y-2">
+                    <div className="flex items-center gap-2 text-blue-300 font-bold text-xs uppercase tracking-wider">
+                      <Building className="h-4 w-4 text-blue-400 shrink-0" />
+                      <span>Cantiere di Destinazione Selezionato:</span>
                     </div>
-                  </div>
-                </div>
 
-                <div className="text-xs text-slate-300 bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1.5">
-                  <p className="font-semibold text-amber-300 flex items-center gap-1.5">
-                    <AlertCircle className="h-4 w-4 text-amber-400" />
-                    <span>Verifica dello spostamento nei Sospesi:</span>
-                  </p>
-                  <p className="text-slate-400 leading-relaxed">
-                    • La voce verrà rimossa dal cantiere attuale (<strong className="text-white">{cantiere.name}</strong>).<br />
-                    • Nella Scheda Sospesi i campi <strong>Nota Interna</strong> (non stampata) e <strong>Nota per il Cliente</strong> (stampata) rimarranno <strong>completamente vuoti</strong>.<br />
-                    • La colonna fornitore riporterà unicamente il fornitore e gli estremi del DDT.
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => setDeleteModalStep('choose_action')}
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
-                  >
-                    ← Torna Indietro (Annulla)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleConfirmMoveToSospesi}
-                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-xl cursor-pointer transition-colors shadow-lg inline-flex items-center gap-1.5"
-                  >
-                    <CheckCircle className="h-4 w-4" />
-                    <span>Conferma Spostamento nei Sospesi</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* STEP 2B: CONFIRM MOVE TO ANOTHER CANTIERE (CLEAR TARGET DETAILS) */}
-            {deleteModalStep === 'confirm_move_cantiere' && (
-              <div className="space-y-4 pt-1 animate-fadeIn">
-                <div className="p-3.5 rounded-xl bg-blue-950/40 border border-blue-500/40 space-y-2">
-                  <div className="flex items-center gap-2 text-blue-300 font-bold text-xs uppercase tracking-wider">
-                    <Building className="h-4 w-4 text-blue-400 shrink-0" />
-                    <span>Cantiere di Destinazione Selezionato:</span>
-                  </div>
-
-                  {(() => {
-                    const targetC = mergedCantieri.find((c) => c.id === targetMoveCantiereId);
-                    if (!targetC) return null;
-                    return (
+                    {targetC && (
                       <div className="bg-slate-900/90 p-3 rounded-lg border border-blue-500/30 space-y-1.5 text-xs">
                         <div className="flex items-center justify-between">
                           <span className="font-bold text-slate-400 uppercase">Nome Cantiere:</span>
@@ -1937,46 +2126,170 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                           <span className="font-mono text-slate-300">Anno {targetC.year} • Stato {targetC.status}</span>
                         </div>
                       </div>
-                    );
-                  })()}
-                </div>
+                    )}
+                  </div>
 
-                <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400 font-bold uppercase">Documento da trasferire:</span>
-                    <span className="text-white font-bold">{movementActionData.movement.docNumber}</span>
+                  <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-bold uppercase">Documento da trasferire:</span>
+                      <span className="text-white font-bold">{mov.docNumber}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-bold uppercase">Data Documento:</span>
+                      <span className="text-slate-200 font-mono">{formatDateItalian(mov.date)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-bold uppercase">Descrizione / Fornitore:</span>
+                      <span className="text-slate-200 font-medium">{mov.typeAndSubject}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-bold uppercase">N./PROT:</span>
+                      <span className="text-slate-200 font-mono">{mov.protocol || '-'}</span>
+                    </div>
+                    <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
+                      <span className="text-slate-400 font-bold uppercase">Importo Originale Riga:</span>
+                      <span className="text-rose-400 font-mono font-bold text-sm">
+                        {formatCurrency(totalAmt)}
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400 font-bold uppercase">Descrizione / Fornitore:</span>
-                    <span className="text-slate-200">{movementActionData.movement.typeAndSubject}</span>
-                  </div>
-                  <div className="flex items-center justify-between pt-1 border-t border-slate-800/60">
-                    <span className="text-slate-400 font-bold uppercase">Importo Trasferito:</span>
-                    <span className="text-rose-400 font-mono font-bold text-sm">
-                      {formatCurrency(movementActionData.movement.purchases || movementActionData.movement.issued)}
-                    </span>
-                  </div>
-                </div>
 
-                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => setDeleteModalStep('choose_action')}
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
-                  >
-                    ← Torna Indietro (Annulla)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleConfirmMoveToOtherCantiere}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl cursor-pointer transition-colors shadow-lg inline-flex items-center gap-1.5"
-                  >
-                    <ArrowRightLeft className="h-4 w-4" />
-                    <span>Conferma e Sposta nel Cantiere</span>
-                  </button>
+                  {/* Scelta Quota: Intero importo o Importo Parziale */}
+                  <div className="bg-slate-950/70 p-3.5 rounded-xl border border-slate-800 space-y-2.5">
+                    <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider">
+                      Quanto desideri spostare in {targetC?.name || 'questo cantiere'}?
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => setMoveAmountMode('full')}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                          moveAmountMode === 'full'
+                            ? 'bg-blue-600/20 border-blue-500 text-white font-bold ring-1 ring-blue-500/50'
+                            : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold">Intero Importo</span>
+                          <span className="font-mono font-bold text-blue-300">{formatCurrency(totalAmt)}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-normal">
+                          Trasferisce l'intero movimento nel nuovo cantiere.
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMoveAmountMode('partial');
+                          if (!partialAmountInput) {
+                            setPartialAmountInput((totalAmt / 2).toFixed(2));
+                          }
+                        }}
+                        className={`p-2.5 rounded-xl border text-left cursor-pointer transition-all ${
+                          moveAmountMode === 'partial'
+                            ? 'bg-blue-600/20 border-blue-500 text-white font-bold ring-1 ring-blue-500/50'
+                            : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-600'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-bold">Solo una Parte (Parziale)</span>
+                          <span className="text-[10px] uppercase font-bold text-blue-400">Personalizzato</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 font-normal">
+                          Sposta una quota; il resto resta in {cantiere.name}.
+                        </p>
+                      </button>
+                    </div>
+
+                    {moveAmountMode === 'partial' && (
+                      <div className="pt-1.5 space-y-2 animate-fadeIn">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                            Inserisci la quota da trasferire nel nuovo cantiere (€):
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-2 text-slate-400 font-mono font-bold">€</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              max={totalAmt}
+                              value={partialAmountInput}
+                              onChange={(e) => setPartialAmountInput(e.target.value)}
+                              className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-blue-500/60 rounded-lg text-sm font-bold font-mono text-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+                              placeholder="0.00"
+                              autoFocus
+                            />
+                          </div>
+                          {parsedPartial <= 0 && (
+                            <p className="text-[10px] text-rose-400 mt-1">
+                              Inserisci una quota positiva superiore a 0.
+                            </p>
+                          )}
+                          {parsedPartial >= totalAmt && (
+                            <p className="text-[10px] text-amber-400 mt-1">
+                              La quota parziale deve essere inferiore al totale (€ {totalAmt.toFixed(2)}). Se desideri spostare tutto, seleziona "Intero Importo".
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Ripartizione live */}
+                        <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                          <div className="bg-slate-900/90 p-2.5 rounded-lg border border-blue-500/30">
+                            <span className="block text-[10px] uppercase text-slate-400 font-bold">Trasferito in {targetC?.name}:</span>
+                            <span className="font-mono font-bold text-blue-300 text-sm">
+                              {formatCurrency(isValidPartial ? parsedPartial : 0)}
+                            </span>
+                            <span className="block text-[10px] text-slate-400 mt-0.5">
+                              Stessa data, doc, fornitore e protocollo
+                            </span>
+                          </div>
+                          <div className="bg-slate-900/90 p-2.5 rounded-lg border border-slate-800">
+                            <span className="block text-[10px] uppercase text-slate-400 font-bold">Resta in {cantiere.name}:</span>
+                            <span className="font-mono font-bold text-slate-200 text-sm">
+                              {formatCurrency(isValidPartial ? remainingAmt : totalAmt)}
+                            </span>
+                            <span className="block text-[10px] text-slate-400 mt-0.5">
+                              Rimanenza riga cantiere
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="text-xs text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                    <p>
+                      ✓ Nel cantiere di destinazione andranno a finire la <strong className="text-slate-200">stessa data ({formatDateItalian(mov.date)})</strong>, lo <strong className="text-slate-200">stesso n° doc ({mov.docNumber})</strong>, lo <strong className="text-slate-200">stesso fornitore</strong> e lo <strong className="text-slate-200">stesso N./PROT ({mov.protocol || '-'})</strong>.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setDeleteModalStep('choose_action')}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+                    >
+                      ← Torna Indietro (Annulla)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmMoveToOtherCantiere}
+                      disabled={isInvalidPartial}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl cursor-pointer transition-colors shadow-lg inline-flex items-center gap-1.5"
+                    >
+                      <ArrowRightLeft className="h-4 w-4" />
+                      <span>
+                        {moveAmountMode === 'partial'
+                          ? `Conferma e Sposta Quota (€ ${isValidPartial ? parsedPartial.toFixed(2) : '0.00'}) nel Cantiere`
+                          : 'Conferma e Sposta nel Cantiere'}
+                      </span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* STEP 2: CONFIRM PERMANENT DELETE (WITH EXPLICIT WARNING) */}
             {deleteModalStep === 'confirm_permanent_delete' && (

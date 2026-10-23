@@ -1028,13 +1028,17 @@ export default function App() {
     );
   };
 
-  // Move an existing movement from a cantiere back to Scheda Sospesi
-  const handleMoveMovementToSospesi = (cantiereId: string, movement: Movement) => {
+  // Move an existing movement from a cantiere back to Scheda Sospesi (full or partial amount)
+  const handleMoveMovementToSospesi = (cantiereId: string, movement: Movement, partialAmount?: number) => {
     if (!currentArtigiano) return;
 
     const sourceC = currentArtigiano.cantieri?.find((c) => c.id === cantiereId);
     const ddtTags = extractDdtEntriesFromMovement(movement);
     const ddtNumberStr = ddtTags.length > 0 ? ddtTags.join(', ') : undefined;
+    const totalAmt = Math.round((movement.purchases || movement.issued || 0) * 100) / 100;
+    const isPartial = partialAmount !== undefined && partialAmount > 0 && partialAmount < totalAmt;
+    const moveAmt = isPartial ? Math.round(partialAmount * 100) / 100 : totalAmt;
+    const remainingAmt = Math.round((totalAmt - moveAmt) * 100) / 100;
 
     const newSospeso: SospesoItem = {
       id: `sosp-${Date.now()}`,
@@ -1042,53 +1046,81 @@ export default function App() {
       docNumber: movement.docNumber,
       supplier: (extractSupplierFromMovement(movement) || currentArtigiano.name).toUpperCase(),
       description: movement.typeAndSubject,
-      amount: movement.purchases || movement.issued || 0,
+      amount: moveAmt,
       protocol: movement.protocol || undefined,
       client: sourceC?.client || undefined,
       ddtNumber: ddtNumberStr,
       status: 'in_attesa_cliente',
       customerNote: undefined,
       internalNote: undefined,
+      attachmentPdf: movement.attachmentPdf,
       createdAt: new Date().toISOString(),
     };
 
     updateCurrentArtigiano((art) => ({
       ...art,
-      cantieri: art.cantieri.map((c) =>
-        c.id === cantiereId
-          ? {
-              ...c,
-              movements: c.movements.filter((m) => m.id !== movement.id),
-              updatedAt: new Date().toISOString(),
-            }
-          : c
-      ),
+      cantieri: art.cantieri.map((c) => {
+        if (c.id !== cantiereId) return c;
+        if (isPartial) {
+          return {
+            ...c,
+            movements: c.movements.map((m) => {
+              if (m.id !== movement.id) return m;
+              return {
+                ...m,
+                purchases: m.purchases !== 0 ? remainingAmt : 0,
+                issued: m.issued !== 0 ? remainingAmt : 0,
+              };
+            }),
+            updatedAt: new Date().toISOString(),
+          };
+        }
+        return {
+          ...c,
+          movements: c.movements.filter((m) => m.id !== movement.id),
+          updatedAt: new Date().toISOString(),
+        };
+      }),
       sospesi: [newSospeso, ...(art.sospesi || [])],
       updatedAt: new Date().toISOString(),
     }));
 
     if (isSupabaseConfigured()) {
-      deleteMovementFromSupabase(movement.id).catch((err) =>
-        console.error('Error removing movement from Supabase:', err)
-      );
+      if (!isPartial) {
+        deleteMovementFromSupabase(movement.id).catch((err) =>
+          console.error('Error removing movement from Supabase:', err)
+        );
+      }
       upsertSospesoToSupabase(currentArtigiano.id, newSospeso).catch((err) =>
         console.error('Error upserting new sospeso to Supabase:', err)
       );
     }
 
-    showNotification(
-      `DDT / Voce "${movement.docNumber}" spostata con successo nella "Scheda Sospesi"!`
-    );
+    if (isPartial) {
+      showNotification(
+        `Quota parziale di € ${moveAmt.toFixed(2)} (su € ${totalAmt.toFixed(2)}) del doc. "${movement.docNumber}" spostata nella Scheda Sospesi (Rimanenza in cantiere: € ${remainingAmt.toFixed(2)})!`
+      );
+    } else {
+      showNotification(
+        `DDT / Voce "${movement.docNumber}" (€ ${totalAmt.toFixed(2)}) spostata con successo nella "Scheda Sospesi"!`
+      );
+    }
   };
 
-  // Move an existing movement from one cantiere to another with INVOICE ACCORPAMENTO
+  // Move an existing movement from one cantiere to another with INVOICE ACCORPAMENTO (full or partial amount)
   const handleMoveMovementToOtherCantiere = (
     sourceCantiereId: string,
     targetCantiereId: string,
-    movement: Movement
+    movement: Movement,
+    partialAmount?: number
   ) => {
     if (!currentArtigiano) return;
     let notificationMsg = '';
+
+    const totalAmt = Math.round((movement.purchases || movement.issued || 0) * 100) / 100;
+    const isPartial = partialAmount !== undefined && partialAmount > 0 && partialAmount < totalAmt;
+    const movAmount = isPartial ? Math.round(partialAmount * 100) / 100 : totalAmt;
+    const remainingAmt = Math.round((totalAmt - movAmount) * 100) / 100;
 
     updateCurrentArtigiano((art) => {
       const sourceC = art.cantieri?.find((c) => c.id === sourceCantiereId);
@@ -1096,7 +1128,6 @@ export default function App() {
       if (!sourceC || !targetC) return art;
 
       const normDoc = extractInvoiceNumberFromMovement(movement) || cleanInvoiceNum(movement.docNumber);
-      const movAmount = Math.round((movement.purchases || movement.issued || 0) * 100) / 100;
       const supplier = extractSupplierFromMovement(movement) || art.name;
 
       // Extract existing DDT tags from moving movement
@@ -1129,7 +1160,9 @@ export default function App() {
           movement.date
         );
 
-        const noteAddition = `Accorpato da cantiere "${sourceC.name}" (€ ${movAmount.toFixed(2)})`;
+        const noteAddition = isPartial
+          ? `Accorpata quota (€ ${movAmount.toFixed(2)}) da cantiere "${sourceC.name}"`
+          : `Accorpato da cantiere "${sourceC.name}" (€ ${movAmount.toFixed(2)})`;
         const updatedNotes = existing.notes ? `${existing.notes} | ${noteAddition}` : noteAddition;
 
         const mergedMovement: Movement = {
@@ -1139,13 +1172,16 @@ export default function App() {
           typeAndSubject: updatedTypeAndSubject,
           notes: updatedNotes,
           protocol: existing.protocol || movement.protocol || '',
+          attachmentPdf: existing.attachmentPdf || movement.attachmentPdf,
         };
 
         nextTargetMovements = targetC.movements.map((m, idx) =>
           idx === existingMovIndex ? mergedMovement : m
         );
 
-        notificationMsg = `Fattura "${movement.docNumber}" accorpata alla riga già presente nel cantiere "${targetC.name}" (Nuovo totale fattura: € ${newPurchases.toFixed(2)})!`;
+        notificationMsg = isPartial
+          ? `Quota di € ${movAmount.toFixed(2)} della fattura "${movement.docNumber}" accorpata nel cantiere "${targetC.name}" (Rimanenza in ${sourceC.name}: € ${remainingAmt.toFixed(2)})!`
+          : `Fattura "${movement.docNumber}" accorpata alla riga già presente nel cantiere "${targetC.name}" (Nuovo totale fattura: € ${newPurchases.toFixed(2)})!`;
       } else {
         // Format the new movement's typeAndSubject strictly as FORNITORE (DDT N. ... DEL ...) and NIENT'ALTRO
         const formattedTypeAndSubject = incomingDdtTags.length > 0
@@ -1154,17 +1190,40 @@ export default function App() {
 
         const newMovement: Movement = {
           ...movement,
+          id: isPartial ? `mov-part-${Date.now()}` : movement.id,
+          date: movement.date,
+          docNumber: movement.docNumber,
+          protocol: movement.protocol || '',
+          purchases: movement.purchases !== 0 ? movAmount : 0,
+          issued: movement.issued !== 0 ? movAmount : 0,
           typeAndSubject: formattedTypeAndSubject,
+          attachmentPdf: movement.attachmentPdf,
         };
 
         nextTargetMovements = [...targetC.movements, newMovement];
-        notificationMsg = `Fattura / DDT "${movement.docNumber}" (€ ${movAmount.toFixed(2)}) spostata con successo nel cantiere "${targetC.name}"!`;
+        notificationMsg = isPartial
+          ? `Quota di € ${movAmount.toFixed(2)} (su € ${totalAmt.toFixed(2)}) del documento "${movement.docNumber}" spostata in "${targetC.name}" (Rimanenza in ${sourceC.name}: € ${remainingAmt.toFixed(2)})!`
+          : `Fattura / DDT "${movement.docNumber}" (€ ${movAmount.toFixed(2)}) spostata con successo nel cantiere "${targetC.name}"!`;
       }
 
       return {
         ...art,
         cantieri: art.cantieri.map((c) => {
           if (c.id === sourceCantiereId) {
+            if (isPartial) {
+              return {
+                ...c,
+                movements: c.movements.map((m) => {
+                  if (m.id !== movement.id) return m;
+                  return {
+                    ...m,
+                    purchases: m.purchases !== 0 ? remainingAmt : 0,
+                    issued: m.issued !== 0 ? remainingAmt : 0,
+                  };
+                }),
+                updatedAt: new Date().toISOString(),
+              };
+            }
             return {
               ...c,
               movements: c.movements.filter((m) => m.id !== movement.id),
@@ -1184,7 +1243,7 @@ export default function App() {
       };
     });
 
-    if (isSupabaseConfigured()) {
+    if (isSupabaseConfigured() && !isPartial) {
       deleteMovementFromSupabase(movement.id).catch(console.error);
     }
 
@@ -1193,10 +1252,11 @@ export default function App() {
     }
   };
 
-  // Sospesi operations: 1-click move to cantiere with INVOICE ACCORPAMENTO and STRICT DDT FORMATTING
+  // Sospesi operations: 1-click move to cantiere with INVOICE ACCORPAMENTO and STRICT DDT FORMATTING (full or partial amount)
   const handleAssignSospesoToCantiere = (
     sospesoId: string,
-    targetCantiereId: string
+    targetCantiereId: string,
+    partialAmount?: number
   ) => {
     let notificationMsg = '';
 
@@ -1212,7 +1272,10 @@ export default function App() {
 
       const targetC = art.cantieri[targetCIndex];
       const normDoc = cleanInvoiceNum(sosp.docNumber);
-      const addAmount = Math.round((Number(sosp.amount) || 0) * 100) / 100;
+      const totalAmt = Math.round((Number(sosp.amount) || 0) * 100) / 100;
+      const isPartial = partialAmount !== undefined && partialAmount > 0 && partialAmount < totalAmt;
+      const addAmount = isPartial ? Math.round(partialAmount * 100) / 100 : totalAmt;
+      const remainingAmt = Math.round((totalAmt - addAmount) * 100) / 100;
       const supplier = (sosp.supplier || art.name).toUpperCase().trim();
 
       // Format the incoming DDT strictly as "DDT N. <numero> DEL <data in DD/MM/YYYY>"
@@ -1260,7 +1323,9 @@ export default function App() {
           idx === existingMovIndex ? mergedMovement : m
         );
 
-        notificationMsg = `DDT "${ddtTag || sosp.docNumber}" (€ ${addAmount.toFixed(2)}) accorpato alla fattura "${existing.docNumber}" nel cantiere "${targetC.name}" (Nuovo totale: € ${newPurchases.toFixed(2)})!`;
+        notificationMsg = isPartial
+          ? `Quota parziale di € ${addAmount.toFixed(2)} (su € ${totalAmt.toFixed(2)}) del DDT "${ddtTag || sosp.docNumber}" accorpata alla fattura "${existing.docNumber}" in "${targetC.name}" (Rimanenza nei Sospesi: € ${remainingAmt.toFixed(2)})!`
+          : `DDT "${ddtTag || sosp.docNumber}" (€ ${addAmount.toFixed(2)}) accorpato alla fattura "${existing.docNumber}" nel cantiere "${targetC.name}" (Nuovo totale: € ${newPurchases.toFixed(2)})!`;
       } else {
         // Strictly format Tipo Doc. / Fornitore as: "FORNITORE (DDT N. ... DEL ...)" and NIENT'ALTRO
         const formattedTypeAndSubject = buildFormattedTypeAndSubject(
@@ -1286,7 +1351,9 @@ export default function App() {
         };
 
         nextMovements = [...targetC.movements, newMovement];
-        notificationMsg = `DDT "${ddtTag || sosp.docNumber}" (€ ${addAmount.toFixed(2)}) spostato con successo nel cantiere "${targetC.name}"!`;
+        notificationMsg = isPartial
+          ? `Quota parziale di € ${addAmount.toFixed(2)} (su € ${totalAmt.toFixed(2)}) del DDT "${ddtTag || sosp.docNumber}" spostata nel cantiere "${targetC.name}" (Rimanenza nei Sospesi: € ${remainingAmt.toFixed(2)})!`
+          : `DDT "${ddtTag || sosp.docNumber}" (€ ${addAmount.toFixed(2)}) spostato con successo nel cantiere "${targetC.name}"!`;
       }
 
       const nextCantieri = art.cantieri.map((c, idx) =>
@@ -1299,8 +1366,10 @@ export default function App() {
           : c
       );
 
-      // Remove ONLY this specific sospeso item
-      const nextSospesi = (art.sospesi || []).filter((s) => s.id !== sospesoId);
+      // If partial, update sospeso amount; if full, remove it
+      const nextSospesi = isPartial
+        ? (art.sospesi || []).map((s) => (s.id === sospesoId ? { ...s, amount: remainingAmt } : s))
+        : (art.sospesi || []).filter((s) => s.id !== sospesoId);
 
       return {
         ...art,
@@ -1310,7 +1379,7 @@ export default function App() {
       };
     });
 
-    if (isSupabaseConfigured()) {
+    if (isSupabaseConfigured() && !partialAmount) {
       deleteSospesoFromSupabase(sospesoId).catch((err) =>
         console.error('Error removing assigned sospeso from Supabase:', err)
       );
@@ -1754,8 +1823,8 @@ export default function App() {
             onUpdateMovementPdf={handleUpdateMovementPdf}
             onDeleteMovement={handleDeleteMovement}
             onDeleteMovementFromAllCantieri={handleDeleteMovementFromAllCantieri}
-            onMoveToSospesi={(mov) => handleMoveMovementToSospesi(currentCantiere.id, mov)}
-            onMoveToOtherCantiere={(sourceId, targetId, mov) => handleMoveMovementToOtherCantiere(sourceId, targetId, mov)}
+            onMoveToSospesi={(mov, partialAmount) => handleMoveMovementToSospesi(currentCantiere.id, mov, partialAmount)}
+            onMoveToOtherCantiere={(sourceId, targetId, mov, partialAmount) => handleMoveMovementToOtherCantiere(sourceId, targetId, mov, partialAmount)}
             onDeleteCantiere={handleDeleteCantiere}
             onOpenXmlImport={() => setIsXmlModalOpen(true)}
             onOpenExcelImport={() => setIsExcelModalOpen(true)}
