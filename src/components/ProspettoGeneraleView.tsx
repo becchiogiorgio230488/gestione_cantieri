@@ -27,6 +27,7 @@ import {
   X,
   Loader2,
   Hash,
+  Warehouse,
 } from 'lucide-react';
 import { Artigiano, Cantiere, QuadraturaContabile, MastrinoItem } from '../types';
 import {
@@ -85,7 +86,7 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
   onDeleteArtigiano,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortField, setSortField] = useState<'name' | 'city' | 'address' | 'ri' | 'acquisti' | 'emesse' | 'rf' | 'marginePercentuale'>('name');
+  const [sortField, setSortField] = useState<'name' | 'city' | 'address' | 'ri' | 'acquisti' | 'emesse' | 'rf' | 'marginePercentuale'>('city');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [cantiereToDelete, setCantiereToDelete] = useState<Cantiere | null>(null);
   const [isConfirmDeleteArtigianoOpen, setIsConfirmDeleteArtigianoOpen] = useState(false);
@@ -277,9 +278,10 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
     });
   }, [artigiano.cantieri]);
 
-  // Filter & Sort
+  // Filter & Sort: i cantieri normali ordinati per Città (o sortField attivo),
+  // e i cantieri selezionati come Magazzino posizionati nelle righe subito precedenti ai Sospesi
   const filteredAndSortedCantieri = useMemo(() => {
-    let list = cantieriRows.filter((r) => {
+    const list = cantieriRows.filter((r) => {
       if (!searchTerm) return true;
       const q = searchTerm.toLowerCase();
       return (
@@ -289,7 +291,10 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
       );
     });
 
-    list.sort((a, b) => {
+    const normal = list.filter((r) => !r.cantiere.isMagazzino);
+    const magazzini = list.filter((r) => Boolean(r.cantiere.isMagazzino));
+
+    const sortFn = (a: (typeof cantieriRows)[0], b: (typeof cantieriRows)[0]) => {
       let valA: any = a[sortField];
       let valB: any = b[sortField];
       if (typeof valA === 'string') {
@@ -298,10 +303,16 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
       }
       if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
       if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
-      return 0;
-    });
+      // Ordinamento secondario: sempre per città (A-Z) e poi per nome
+      const cityComp = a.city.localeCompare(b.city, 'it', { sensitivity: 'base' });
+      if (cityComp !== 0) return cityComp;
+      return a.name.localeCompare(b.name, 'it', { sensitivity: 'base' });
+    };
 
-    return list;
+    normal.sort(sortFn);
+    magazzini.sort(sortFn);
+
+    return [...normal, ...magazzini];
   }, [cantieriRows, searchTerm, sortField, sortDirection]);
 
   // Totali cantieri
@@ -842,7 +853,11 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
                     <tr
                       key={c.id}
                       onClick={() => onSelectCantiere(c.id)}
-                      className="hover:bg-slate-800/60 transition-colors group cursor-pointer"
+                      className={`transition-colors group cursor-pointer ${
+                        c.isMagazzino
+                          ? 'bg-amber-500/[0.04] hover:bg-amber-500/[0.10] border-l-2 border-l-amber-500'
+                          : 'hover:bg-slate-800/60'
+                      }`}
                     >
                       {/* NOME CANTIERE (MODIFICABILE - SEMPRE IN MAIUSCOLO) */}
                       <td
@@ -884,12 +899,20 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
                           </div>
                         ) : (
                           <div className="flex items-center justify-between gap-1 group/name">
-                            <span
-                              onClick={() => onSelectCantiere(c.id)}
-                              className="cursor-pointer hover:underline"
-                            >
-                              {row.name.toUpperCase()}
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span
+                                onClick={() => onSelectCantiere(c.id)}
+                                className="cursor-pointer hover:underline"
+                              >
+                                {row.name.toUpperCase()}
+                              </span>
+                              {c.isMagazzino && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase tracking-wider">
+                                  <Warehouse className="h-3 w-3 text-amber-400" />
+                                  MAGAZZINO
+                                </span>
+                              )}
+                            </div>
                             <button
                               onClick={() => handleStartEditName(c)}
                               className="opacity-0 group-hover/name:opacity-100 p-1 text-amber-400 hover:text-amber-300 hover:bg-slate-800 rounded transition-opacity cursor-pointer shrink-0"

@@ -111,7 +111,7 @@ export function buildCantiereDetailSheet(
   // % UTILE CANTIERE: [+XX.X%] | UTILE EFFETTIVO: [€ XXX.XX]
   // -------------------------------------------------------------
   const totals = calculateCantiereTotals(cantiere);
-  const nomeCantiere = (cantiere.name || '').toUpperCase();
+  const nomeCantiere = (cantiere.name || '').toUpperCase() + (cantiere.isMagazzino ? ' [MAGAZZINO]' : '');
   const cittaCantiere = (cantiere.city || '').toUpperCase();
   const indirizzoCantiere = (cantiere.address || '').toUpperCase();
   const clienteNome = (cantiere.client || cantiere.name || '').toUpperCase();
@@ -502,17 +502,24 @@ export function createProspettoSheet(
   });
 
   // L'elenco dei cantieri nella tabella deve essere in ordine di CITTA'
+  // I cantieri selezionati come Magazzino vanno posizionati subito prima dei SOSPESI
   const rawCantieri = artigiano.cantieri || [];
-  const cantieri = [...rawCantieri].sort((a, b) => {
-    const cityA = (a.city || '').trim().toUpperCase();
-    const cityB = (b.city || '').trim().toUpperCase();
-    if (cityA !== cityB) {
-      return cityA.localeCompare(cityB, 'it', { sensitivity: 'base' });
-    }
-    const addrA = (a.address || a.name || '').trim().toUpperCase();
-    const addrB = (b.address || b.name || '').trim().toUpperCase();
-    return addrA.localeCompare(addrB, 'it', { sensitivity: 'base' });
-  });
+  const normalCantieri = rawCantieri.filter((c) => !c.isMagazzino);
+  const magazzinoCantieri = rawCantieri.filter((c) => Boolean(c.isMagazzino));
+
+  const sortByCity = (list: typeof rawCantieri) =>
+    [...list].sort((a, b) => {
+      const cityA = (a.city || '').trim().toUpperCase();
+      const cityB = (b.city || '').trim().toUpperCase();
+      if (cityA !== cityB) {
+        return cityA.localeCompare(cityB, 'it', { sensitivity: 'base' });
+      }
+      const addrA = (a.address || a.name || '').trim().toUpperCase();
+      const addrB = (b.address || b.name || '').trim().toUpperCase();
+      return addrA.localeCompare(addrB, 'it', { sensitivity: 'base' });
+    });
+
+  const cantieri = [...sortByCity(normalCantieri), ...sortByCity(magazzinoCantieri)];
 
   const startDataRow = 5;
 
@@ -523,7 +530,9 @@ export function createProspettoSheet(
     const acq = t.totaleAcquisti;
     const eme = t.totaleEmesse;
     const rf = computeCantiereRF(ri, acq, eme);
-    const clientOrName = (c.client || c.name || '').toUpperCase();
+    const clientOrName = c.isMagazzino
+      ? `${(c.client || c.name || '').toUpperCase()} [MAGAZZINO]`
+      : (c.client || c.name || '').toUpperCase();
 
     const row = ws.addRow([
       clientOrName,

@@ -25,6 +25,7 @@ import {
   FileText,
   Paperclip,
   Hash,
+  Warehouse,
 } from 'lucide-react';
 import { Cantiere, Movement, SospesoItem, AttachmentPdf } from '../types';
 import { calculateCantiereTotals, formatCurrency, formatDateItalian, getTodayISODate } from '../utils/calculations';
@@ -257,6 +258,14 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
       updatedAt: new Date().toISOString(),
     });
     setIsEditingName(false);
+  };
+
+  const handleToggleMagazzino = (checked: boolean) => {
+    onUpdateCantiere({
+      ...cantiere,
+      isMagazzino: checked,
+      updatedAt: new Date().toISOString(),
+    });
   };
 
   useEffect(() => {
@@ -536,12 +545,29 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
             >
               {allCantieri.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} ({c.client})
+                  {c.name} {c.isMagazzino ? '[MAGAZZINO]' : ''} ({c.client})
                 </option>
               ))}
             </select>
             <ChevronDown className="h-3.5 w-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
+
+          {/* Quick Magazzino toggle in navigation bar */}
+          <label
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 hover:border-amber-400 cursor-pointer select-none text-xs font-bold transition-colors"
+            title="Indica se si tratta di Magazzino (posizionato prima dei Sospesi)"
+          >
+            <input
+              type="checkbox"
+              checked={Boolean(cantiere.isMagazzino)}
+              onChange={(e) => handleToggleMagazzino(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-slate-600 text-amber-500 focus:ring-amber-400 accent-amber-500 cursor-pointer"
+            />
+            <span className={cantiere.isMagazzino ? "text-amber-400 font-bold flex items-center gap-1" : "text-slate-300 flex items-center gap-1"}>
+              <Warehouse className="h-3 w-3 text-amber-400" />
+              Magazzino
+            </span>
+          </label>
         </div>
 
         {/* Action Buttons */}
@@ -677,23 +703,41 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Campo 1: CANTIERE (MODIFICABILE - SEMPRE IN MAIUSCOLO) */}
             <div className="bg-slate-950/80 p-3.5 rounded-lg border border-slate-800">
-              <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center justify-between mb-1.5 flex-wrap gap-2">
                 <span className="block text-[11px] font-bold text-amber-400 uppercase tracking-wider">
                   Nome Cantiere
                 </span>
-                {!isEditingName && (
-                  <button
-                    onClick={() => {
-                      setNameValue(cantiere.name.toUpperCase());
-                      setIsEditingName(true);
-                    }}
-                    className="text-[11px] text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 cursor-pointer hover:underline"
-                    title="Modifica nome cantiere"
+                <div className="flex items-center gap-2">
+                  {/* Segno di spunta Magazzino vicino al nome */}
+                  <label
+                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-slate-900 border border-slate-700 hover:border-amber-400 cursor-pointer select-none text-[11px] font-bold transition-colors"
+                    title="Spunta se si tratta di Magazzino (sarà posizionato subito prima dei Sospesi nel prospetto ed esportazioni)"
                   >
-                    <Edit2 className="h-3 w-3" />
-                    <span>Modifica</span>
-                  </button>
-                )}
+                    <input
+                      type="checkbox"
+                      checked={Boolean(cantiere.isMagazzino)}
+                      onChange={(e) => handleToggleMagazzino(e.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-slate-600 text-amber-500 focus:ring-amber-400 accent-amber-500 cursor-pointer"
+                    />
+                    <span className={cantiere.isMagazzino ? "text-amber-400 font-extrabold flex items-center gap-1" : "text-slate-300 flex items-center gap-1"}>
+                      <Warehouse className="h-3 w-3 text-amber-400" />
+                      Magazzino
+                    </span>
+                  </label>
+                  {!isEditingName && (
+                    <button
+                      onClick={() => {
+                        setNameValue(cantiere.name.toUpperCase());
+                        setIsEditingName(true);
+                      }}
+                      className="text-[11px] text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 cursor-pointer hover:underline"
+                      title="Modifica nome cantiere"
+                    >
+                      <Edit2 className="h-3 w-3" />
+                      <span>Modifica</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {isEditingName ? (
@@ -741,7 +785,15 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
                 </div>
               ) : (
                 <>
-                  <div className="font-extrabold text-base text-white uppercase">{cantiere.name.toUpperCase()}</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="font-extrabold text-base text-white uppercase">{cantiere.name.toUpperCase()}</div>
+                    {cantiere.isMagazzino && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase tracking-wider">
+                        <Warehouse className="h-3 w-3 text-amber-400" />
+                        MAGAZZINO
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     Coincide sempre con il cliente / committente
                   </p>
@@ -1712,7 +1764,7 @@ export const SchedaCantiereView: React.FC<SchedaCantiereViewProps> = ({
       {/* MODAL GESTIONE RIMOZIONE MOVIMENTO / DDT (Sposta in Sospesi / Sposta in Cantiere / Cancella Definitivamente) */}
       {movementActionData && (
         <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-xl w-full p-5 sm:p-6 shadow-2xl text-left space-y-4 animate-scaleIn my-8">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-xl w-full p-5 sm:p-6 shadow-2xl text-left space-y-4 animate-scaleIn my-auto max-h-[90vh] overflow-y-auto">
             {/* Modal Header */}
             <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2.5">

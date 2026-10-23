@@ -1124,8 +1124,8 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
       {/* TRASH ACTION MODAL (Choice: 1. Sposta in Cantiere | 2. Elimina) */}
       {/* ------------------------------------------------------------- */}
       {actionItem && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4">
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 animate-fadeIn overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-xl w-full p-5 sm:p-6 shadow-2xl space-y-4 my-auto max-h-[90vh] overflow-y-auto">
             {/* Modal Header */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2.5">
@@ -1564,8 +1564,8 @@ export const SospesiView: React.FC<SospesiViewProps> = ({
       {/* BULK MOVE CONFIRMATION MODAL */}
       {/* ------------------------------------------------------------- */}
       {bulkAssignConfirmTarget && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-          <div className="bg-slate-900 border border-blue-500/40 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 animate-fadeIn overflow-y-auto">
+          <div className="bg-slate-900 border border-blue-500/40 rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4 my-auto max-h-[90vh] overflow-y-auto">
             <div className="flex items-center gap-2.5 pb-3 border-b border-slate-800">
               <div className="p-2 bg-blue-500/20 text-blue-400 rounded-xl shrink-0">
                 <ArrowRightLeft className="h-5 w-5" />

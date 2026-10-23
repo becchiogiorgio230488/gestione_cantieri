@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Building, Check, MapPin } from 'lucide-react';
+import { X, Building, Check, MapPin, Warehouse } from 'lucide-react';
 import { Cantiere, CantiereCategory, CantiereStatus } from '../types';
 import { getTodayISODate } from '../utils/calculations';
 
@@ -46,6 +46,9 @@ export const CantiereModal: React.FC<CantiereModalProps> = ({
     cantiereToEdit?.status || initialData?.status || 'attivo'
   );
   const [notes, setNotes] = useState(cantiereToEdit?.notes || initialData?.notes || '');
+  const [isMagazzino, setIsMagazzino] = useState<boolean>(
+    Boolean(cantiereToEdit?.isMagazzino ?? initialData?.isMagazzino ?? false)
+  );
   const [formError, setFormError] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -75,6 +78,7 @@ export const CantiereModal: React.FC<CantiereModalProps> = ({
       finalInventory: Math.round(rf * 100) / 100,
       category,
       status,
+      isMagazzino,
       notes: notes.trim() || undefined,
     });
   };
@@ -217,6 +221,25 @@ export const CantiereModal: React.FC<CantiereModalProps> = ({
                 <option value="sospeso">Sospeso</option>
               </select>
             </div>
+
+            {/* Opzione Magazzino */}
+            <label className="flex items-center gap-3 p-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-amber-400/50 cursor-pointer select-none transition-colors">
+              <input
+                type="checkbox"
+                checked={isMagazzino}
+                onChange={(e) => setIsMagazzino(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-600 text-amber-500 focus:ring-amber-400 accent-amber-500 cursor-pointer"
+              />
+              <div>
+                <span className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <Warehouse className="h-3.5 w-3.5 text-amber-400" />
+                  Tratta come Magazzino
+                </span>
+                <span className="text-[11px] text-slate-400 block mt-0.5">
+                  Posiziona questo cantiere nella riga subito precedente ai Sospesi nel prospetto ed esportazioni (XLS / PDF)
+                </span>
+              </div>
+            </label>
 
             <div>
               <label className="block text-slate-400 font-semibold mb-1">NOTE E DETTAGLI</label>

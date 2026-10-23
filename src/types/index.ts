@@ -42,6 +42,7 @@ export interface Cantiere {
   finalInventory: number; // RIMANENZE FINALI (RF)
   category: CantiereCategory;
   status: CantiereStatus;
+  isMagazzino?: boolean; // Contrassegna se il cantiere è un Magazzino
   notes?: string;
   movements: Movement[];
   createdAt: string;

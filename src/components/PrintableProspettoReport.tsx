@@ -31,17 +31,24 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
   let sumRF = 0;
 
   // L'elenco dei cantieri nella tabella deve essere in ordine di CITTA'
+  // I cantieri selezionati come Magazzino vanno posizionati subito prima dei SOSPESI
   const rawCantieri = artigiano.cantieri || [];
-  const sortedCantieri = [...rawCantieri].sort((a, b) => {
-    const cityA = (a.city || '').trim().toUpperCase();
-    const cityB = (b.city || '').trim().toUpperCase();
-    if (cityA !== cityB) {
-      return cityA.localeCompare(cityB, 'it', { sensitivity: 'base' });
-    }
-    const addrA = (a.address || a.name || '').trim().toUpperCase();
-    const addrB = (b.address || b.name || '').trim().toUpperCase();
-    return addrA.localeCompare(addrB, 'it', { sensitivity: 'base' });
-  });
+  const normalCantieri = rawCantieri.filter((c) => !c.isMagazzino);
+  const magazzinoCantieri = rawCantieri.filter((c) => Boolean(c.isMagazzino));
+
+  const sortByCity = (list: typeof rawCantieri) =>
+    [...list].sort((a, b) => {
+      const cityA = (a.city || '').trim().toUpperCase();
+      const cityB = (b.city || '').trim().toUpperCase();
+      if (cityA !== cityB) {
+        return cityA.localeCompare(cityB, 'it', { sensitivity: 'base' });
+      }
+      const addrA = (a.address || a.name || '').trim().toUpperCase();
+      const addrB = (b.address || b.name || '').trim().toUpperCase();
+      return addrA.localeCompare(addrB, 'it', { sensitivity: 'base' });
+    });
+
+  const sortedCantieri = [...sortByCity(normalCantieri), ...sortByCity(magazzinoCantieri)];
 
   const rows = sortedCantieri.map((c) => {
     const t = calculateCantiereTotals(c);
@@ -66,6 +73,7 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
       rf,
       marginePercentuale: t.marginePercentuale,
       isPositive: t.isPositive,
+      isMagazzino: Boolean(c.isMagazzino),
     };
   });
 
@@ -190,14 +198,14 @@ export const PrintableProspettoReport: React.FC<PrintableProspettoReportProps> =
             {rows.map((r) => (
               <tr key={r.c.id} className="hover:bg-slate-50/50">
                 <td className="p-2 border border-slate-300 font-bold text-slate-950">
-                  {r.c.client ? (
-                    <div>
-                      <span>{r.c.client.toUpperCase()}</span>
-                      <span className="block text-[10px] font-normal text-slate-500">{r.name}</span>
-                    </div>
-                  ) : (
-                    r.name
-                  )}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span>{(r.c.client || r.c.name || '').toUpperCase()}</span>
+                    {r.isMagazzino && (
+                      <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 uppercase">
+                        MAGAZZINO
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="p-2 border border-slate-300 text-slate-800">{r.city}</td>
                 <td className="p-2 border border-slate-300 text-slate-800">{r.address}</td>
