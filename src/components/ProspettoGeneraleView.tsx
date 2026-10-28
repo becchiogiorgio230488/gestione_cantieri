@@ -47,6 +47,7 @@ import {
   exportProspettoGeneralePdf,
 } from '../utils/pdfExport';
 import { ConfirmModal } from './ConfirmModal';
+import { exportSingleClientBackupJSON } from '../utils/storage';
 
 interface ProspettoGeneraleViewProps {
   artigiano: Artigiano;
@@ -656,6 +657,16 @@ export const ProspettoGeneraleView: React.FC<ProspettoGeneraleViewProps> = ({
             >
               <Printer className="h-4 w-4 text-slate-300" />
               <span>Stampa / PDF</span>
+            </button>
+
+            {/* Esporta Backup Singolo Cliente (.json) */}
+            <button
+              onClick={() => exportSingleClientBackupJSON(artigiano)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-all shadow-sm cursor-pointer"
+              title={`Scarica file di backup .JSON completo con metadati per il solo cliente ${artigiano.name}`}
+            >
+              <Download className="h-4 w-4 text-amber-400" />
+              <span>Backup Cliente (.json)</span>
             </button>
           </div>
         </div>

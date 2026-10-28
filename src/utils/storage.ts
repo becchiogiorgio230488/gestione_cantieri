@@ -1,4 +1,12 @@
-import { Artigiano, Cantiere, SospesoItem, QuadraturaContabile } from '../types';
+import {
+  Artigiano,
+  Cantiere,
+  SospesoItem,
+  QuadraturaContabile,
+  FullBackupPayload,
+  SingleClientBackupPayload,
+  ParsedBackupInfo,
+} from '../types';
 
 const STORAGE_KEY_ARTIGIANI = 'z_cantieri_2026_artigiani_v3';
 
@@ -524,23 +532,220 @@ export function resetAllDataToDefaults(): Artigiano[] {
   return INITIAL_ARTIGIANI;
 }
 
-export function exportBackupJSON(artigiani: Artigiano[]): void {
-  const payload = {
-    version: '2026.3-multi-client',
-    description: 'Backup Z-Cantieri Modulo Artigiani - Multi Cliente Studio Contabile',
-    exportedAt: new Date().toISOString(),
-    artigiani,
-  };
-  const dataStr =
-    'data:text/json;charset=utf-8,' +
-    encodeURIComponent(JSON.stringify(payload, null, 2));
+function triggerJsonDownload(data: any, fileName: string): void {
+  const jsonStr = JSON.stringify(data, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
   const downloadAnchor = document.createElement('a');
-  downloadAnchor.setAttribute('href', dataStr);
-  downloadAnchor.setAttribute(
-    'download',
-    `backup_z_cantieri_studio_${new Date().toISOString().slice(0, 10)}.json`
-  );
+  downloadAnchor.setAttribute('href', url);
+  downloadAnchor.setAttribute('download', fileName);
   document.body.appendChild(downloadAnchor);
   downloadAnchor.click();
   downloadAnchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Esporta il backup completo di tutti i clienti, cantieri, movimenti e sospesi.
+ */
+export function exportFullBackupJSON(artigiani: Artigiano[]): void {
+  const totalCantieri = artigiani.reduce((acc, a) => acc + (a.cantieri?.length || 0), 0);
+  const totalSospesi = artigiani.reduce((acc, a) => acc + (a.sospesi?.length || 0), 0);
+
+  const payload: FullBackupPayload = {
+    version: '2026.4',
+    type: 'FULL_BACKUP',
+    description: 'Backup Completo Gestione Cantieri - Tutti i Clienti dello Studio',
+    exportedAt: new Date().toISOString(),
+    totalClients: artigiani.length,
+    totalCantieri,
+    totalSospesi,
+    artigiani,
+  };
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  triggerJsonDownload(payload, `backup_gestione_cantieri_completo_${dateStr}.json`);
+}
+
+/**
+ * Esporta il backup dedicato di un SINGOLO cliente con tutti i suoi cantieri e schede collegate.
+ */
+export function exportSingleClientBackupJSON(artigiano: Artigiano): void {
+  const totalCantieri = artigiano.cantieri?.length || 0;
+  const totalSospesi = artigiano.sospesi?.length || 0;
+  const cleanName = (artigiano.name || 'cliente')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_');
+
+  const payload: SingleClientBackupPayload = {
+    version: '2026.4',
+    type: 'SINGLE_CLIENT_BACKUP',
+    description: `Backup Singolo Cliente: ${artigiano.name}`,
+    exportedAt: new Date().toISOString(),
+    clientId: artigiano.id,
+    clientName: artigiano.name,
+    clientBusinessName: artigiano.businessName,
+    totalCantieri,
+    totalSospesi,
+    artigiano,
+    artigiani: [artigiano], // Mantiene compatibilità se riaperto come array
+  };
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  triggerJsonDownload(payload, `backup_cliente_${cleanName}_${dateStr}.json`);
+}
+
+/**
+ * Funzione legacy per compatibilità con chiamate pregresse.
+ */
+export function exportBackupJSON(artigiani: Artigiano[]): void {
+  exportFullBackupJSON(artigiani);
+}
+
+/**
+ * Analizza e valida il contenuto di un file JSON di backup (totale, singolo o legacy).
+ */
+export function parseBackupJSON(rawText: string): ParsedBackupInfo {
+  try {
+    const parsed = JSON.parse(rawText);
+    if (!parsed || typeof parsed !== 'object') {
+      return {
+        isValid: false,
+        error: 'Il file selezionato non è un oggetto JSON valido.',
+        type: 'LEGACY',
+        totalClients: 0,
+        clients: [],
+      };
+    }
+
+    // 1. Caso: Backup Singolo Cliente esplicito (type: "SINGLE_CLIENT_BACKUP")
+    if (parsed.type === 'SINGLE_CLIENT_BACKUP' && parsed.artigiano) {
+      const normalized = normalizeArtigianiData([parsed.artigiano]);
+      const target = normalized[0];
+      return {
+        isValid: true,
+        type: 'SINGLE_CLIENT_BACKUP',
+        version: parsed.version || '2026.4',
+        exportedAt: parsed.exportedAt,
+        totalClients: 1,
+        clients: normalized,
+        singleClientInfo: {
+          id: target.id,
+          name: target.name,
+          businessName: target.businessName,
+          cantieriCount: target.cantieri?.length || 0,
+          sospesiCount: target.sospesi?.length || 0,
+        },
+      };
+    }
+
+    // 2. Caso: Backup Completo esplicito (type: "FULL_BACKUP")
+    if (parsed.type === 'FULL_BACKUP' && Array.isArray(parsed.artigiani)) {
+      const normalized = normalizeArtigianiData(parsed.artigiani);
+      return {
+        isValid: true,
+        type: 'FULL_BACKUP',
+        version: parsed.version || '2026.4',
+        exportedAt: parsed.exportedAt,
+        totalClients: normalized.length,
+        clients: normalized,
+      };
+    }
+
+    // 3. Caso: Formato con artigiani[] (es. legacy 2026.3)
+    if (Array.isArray(parsed.artigiani) && parsed.artigiani.length > 0) {
+      const normalized = normalizeArtigianiData(parsed.artigiani);
+      if (normalized.length === 1) {
+        const target = normalized[0];
+        return {
+          isValid: true,
+          type: 'SINGLE_CLIENT_BACKUP',
+          version: parsed.version || 'legacy',
+          exportedAt: parsed.exportedAt,
+          totalClients: 1,
+          clients: normalized,
+          singleClientInfo: {
+            id: target.id,
+            name: target.name,
+            businessName: target.businessName,
+            cantieriCount: target.cantieri?.length || 0,
+            sospesiCount: target.sospesi?.length || 0,
+          },
+        };
+      }
+      return {
+        isValid: true,
+        type: 'FULL_BACKUP',
+        version: parsed.version || 'legacy',
+        exportedAt: parsed.exportedAt,
+        totalClients: normalized.length,
+        clients: normalized,
+      };
+    }
+
+    // 4. Caso: Array diretto di Artigiano[]
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const normalized = normalizeArtigianiData(parsed);
+      if (normalized.length === 1) {
+        const target = normalized[0];
+        return {
+          isValid: true,
+          type: 'SINGLE_CLIENT_BACKUP',
+          version: 'raw-array',
+          totalClients: 1,
+          clients: normalized,
+          singleClientInfo: {
+            id: target.id,
+            name: target.name,
+            businessName: target.businessName,
+            cantieriCount: target.cantieri?.length || 0,
+            sospesiCount: target.sospesi?.length || 0,
+          },
+        };
+      }
+      return {
+        isValid: true,
+        type: 'FULL_BACKUP',
+        version: 'raw-array',
+        totalClients: normalized.length,
+        clients: normalized,
+      };
+    }
+
+    // 5. Caso: Singolo oggetto Artigiano diretto (ha id, name, cantieri)
+    if (parsed.id && parsed.name && Array.isArray(parsed.cantieri)) {
+      const normalized = normalizeArtigianiData([parsed as Artigiano]);
+      const target = normalized[0];
+      return {
+        isValid: true,
+        type: 'SINGLE_CLIENT_BACKUP',
+        version: 'single-object',
+        totalClients: 1,
+        clients: normalized,
+        singleClientInfo: {
+          id: target.id,
+          name: target.name,
+          businessName: target.businessName,
+          cantieriCount: target.cantieri?.length || 0,
+          sospesiCount: target.sospesi?.length || 0,
+        },
+      };
+    }
+
+    return {
+      isValid: false,
+      error: 'Struttura file non riconosciuta: non contiene clienti o cantieri validi.',
+      type: 'LEGACY',
+      totalClients: 0,
+      clients: [],
+    };
+  } catch (err: any) {
+    return {
+      isValid: false,
+      error: `Errore nella decodifica JSON: ${err?.message || 'formato non valido'}`,
+      type: 'LEGACY',
+      totalClients: 0,
+      clients: [],
+    };
+  }
 }

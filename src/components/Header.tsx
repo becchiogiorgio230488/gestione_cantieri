@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Cloud,
   Hash,
+  Upload,
 } from 'lucide-react';
 import { Artigiano, NavigationLevel } from '../types';
 import { exportBackupJSON, resetAllDataToDefaults } from '../utils/storage';
@@ -33,6 +34,7 @@ interface HeaderProps {
   onOpenExcelImport?: () => void;
   onOpenSupabaseSync?: () => void;
   onOpenProtocolSearch?: () => void;
+  onOpenBackupRestoreModal?: (initialTab?: 'export' | 'import', initialArtigianoId?: string) => void;
   onResetData: () => void;
 }
 
@@ -51,6 +53,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenExcelImport,
   onOpenSupabaseSync,
   onOpenProtocolSearch,
+  onOpenBackupRestoreModal,
   onResetData,
 }) => {
   const currentArtigiano =
@@ -162,14 +165,34 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {/* Backup */}
+            {/* Backup & Ripristino JSON */}
             <button
-              onClick={handleBackup}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer"
-              title="Scarica backup JSON completo dei dati"
+              onClick={() => {
+                if (onOpenBackupRestoreModal) {
+                  onOpenBackupRestoreModal('export', selectedArtigianoId || undefined);
+                } else {
+                  handleBackup();
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer shadow-sm"
+              title="Esporta backup JSON (completo o per singolo cliente)"
             >
-              <Download className="h-4 w-4 text-slate-400" />
+              <Download className="h-4 w-4 text-amber-400" />
               <span>Backup</span>
+            </button>
+
+            <button
+              onClick={() => {
+                if (onOpenBackupRestoreModal) {
+                  onOpenBackupRestoreModal('import', selectedArtigianoId || undefined);
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium text-slate-200 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer shadow-sm"
+              title="Ricarica e ripristina un backup .JSON nel database"
+            >
+              <Upload className="h-4 w-4 text-emerald-400" />
+              <span className="hidden sm:inline">Ripristina JSON</span>
+              <span className="sm:hidden">Ripristina</span>
             </button>
 
             <button

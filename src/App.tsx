@@ -14,6 +14,7 @@ import { PrintableProspettoReport } from './components/PrintableProspettoReport'
 import { PrintableSospesiReport } from './components/PrintableSospesiReport';
 import { SupabaseSyncModal } from './components/SupabaseSyncModal';
 import { ProtocolSearchModal } from './components/ProtocolSearchModal';
+import { BackupRestoreModal } from './components/BackupRestoreModal';
 import {
   Artigiano,
   Cantiere,
@@ -55,6 +56,8 @@ import {
   upsertSospesoToSupabase,
   subscribeToRealtimeChanges,
   migrateAllLocalDataToSupabase,
+  restoreSingleArtigianoToSupabase,
+  restoreFullBackupToSupabase,
 } from './services/supabaseService';
 
 export default function App() {
@@ -83,6 +86,17 @@ export default function App() {
   const [isXmlModalOpen, setIsXmlModalOpen] = useState(false);
   const [isExcelModalOpen, setIsExcelModalOpen] = useState(false);
   const [isFatturaEmessaModalOpen, setIsFatturaEmessaModalOpen] = useState(false);
+
+  // Backup & Ripristino Modal State
+  const [isBackupRestoreModalOpen, setIsBackupRestoreModalOpen] = useState(false);
+  const [backupModalInitialTab, setBackupModalInitialTab] = useState<'export' | 'import'>('export');
+  const [backupModalArtigianoId, setBackupModalArtigianoId] = useState<string | undefined>(undefined);
+
+  const handleOpenBackupRestoreModal = (initialTab: 'export' | 'import' = 'export', artigianoId?: string) => {
+    setBackupModalInitialTab(initialTab);
+    setBackupModalArtigianoId(artigianoId || selectedArtigianoId || undefined);
+    setIsBackupRestoreModalOpen(true);
+  };
 
   // Ricerca fattura per Numero di Protocollo (N./PROT)
   const [isProtocolSearchOpen, setIsProtocolSearchOpen] = useState(false);
@@ -175,6 +189,71 @@ export default function App() {
     lastLocalSaveRef.current = Date.now();
     setArtigiani(nextList);
     saveArtigiani(nextList);
+  };
+
+  const handleRestoreBackup = async (
+    restoredClients: Artigiano[],
+    isFullOverwrite: boolean,
+    targetClientId?: string
+  ) => {
+    try {
+      // 1. CASO SINGOLO CLIENTE (o estrazione singola da backup totale)
+      if (targetClientId || restoredClients.length === 1) {
+        const singleClient = restoredClients[0];
+        let nextList = [...artigiani];
+        const existingIndex = nextList.findIndex((a) => a.id === singleClient.id);
+        if (existingIndex >= 0) {
+          nextList[existingIndex] = singleClient;
+        } else {
+          nextList.push(singleClient);
+        }
+
+        updateArtigianiList(nextList);
+        setSelectedArtigianoId(singleClient.id);
+        if (singleClient.cantieri && singleClient.cantieri.length > 0) {
+          setSelectedCantiereId(singleClient.cantieri[0].id);
+        }
+
+        if (isSupabaseConfigured()) {
+          await restoreSingleArtigianoToSupabase(singleClient);
+        }
+
+        showNotification(`Backup ripristinato: cliente "${singleClient.name}" e cantieri sincronizzati.`);
+      } else {
+        // 2. CASO BACKUP TOTALE (tutti i clienti)
+        let nextList: Artigiano[];
+        if (isFullOverwrite) {
+          nextList = restoredClients;
+        } else {
+          // Merge conservativo: aggiorna i clienti del backup mantenendo gli altri presenti
+          const restoredMap = new Map(restoredClients.map((c) => [c.id, c]));
+          nextList = artigiani.map((existing) => restoredMap.get(existing.id) || existing);
+          restoredClients.forEach((rc) => {
+            if (!nextList.some((c) => c.id === rc.id)) {
+              nextList.push(rc);
+            }
+          });
+        }
+
+        updateArtigianiList(nextList);
+        if (nextList.length > 0) {
+          setSelectedArtigianoId(nextList[0].id);
+          if (nextList[0].cantieri.length > 0) {
+            setSelectedCantiereId(nextList[0].cantieri[0].id);
+          }
+        }
+
+        if (isSupabaseConfigured()) {
+          await restoreFullBackupToSupabase(restoredClients, isFullOverwrite);
+        }
+
+        showNotification(`Ripristino completato: ${restoredClients.length} clienti sincronizzati.`);
+      }
+    } catch (err: any) {
+      console.error('Errore durante il ripristino backup in App:', err);
+      showNotification(`Errore ripristino: ${err?.message || 'impossibile sincronizzare i dati'}`);
+      throw err;
+    }
   };
 
   const updateCurrentArtigiano = (updater: (prev: Artigiano) => Artigiano) => {
@@ -1742,6 +1821,7 @@ export default function App() {
         onOpenXmlImport={() => setIsXmlModalOpen(true)}
         onOpenExcelImport={() => setIsExcelModalOpen(true)}
         onOpenProtocolSearch={() => handleOpenProtocolSearch()}
+        onOpenBackupRestoreModal={handleOpenBackupRestoreModal}
         onResetData={() => {
           const reloaded = resetAllDataToDefaults();
           setArtigiani(reloaded);
@@ -1957,6 +2037,18 @@ export default function App() {
           setNavLevel('scheda_sospesi');
         }}
       />
+
+      {/* Modal 7: Esportazione e Ripristino Backup JSON */}
+      {isBackupRestoreModalOpen && (
+        <BackupRestoreModal
+          artigiani={artigiani}
+          initialTab={backupModalInitialTab}
+          initialSelectedArtigianoId={backupModalArtigianoId}
+          isSupabaseConnected={isSupabaseConnected}
+          onClose={() => setIsBackupRestoreModalOpen(false)}
+          onRestore={handleRestoreBackup}
+        />
+      )}
     </div>
   );
 }

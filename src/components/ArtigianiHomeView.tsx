@@ -19,10 +19,12 @@ import {
   CheckCircle2,
   AlertTriangle,
   Sparkles,
+  Download,
 } from 'lucide-react';
 import { Artigiano, CantiereCategory } from '../types';
 import { calculateArtigianoTotals, formatCurrency } from '../utils/calculations';
 import { ConfirmModal } from './ConfirmModal';
+import { exportSingleClientBackupJSON } from '../utils/storage';
 
 interface ArtigianiHomeViewProps {
   artigiani: Artigiano[];
@@ -217,8 +219,18 @@ export const ArtigianiHomeView: React.FC<ArtigianiHomeViewProps> = ({
                       </div>
                     </div>
 
-                    {/* Actions: Edit / Delete */}
+                    {/* Actions: Backup / Edit / Delete */}
                     <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          exportSingleClientBackupJSON(art);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-amber-400 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                        title={`Esporta backup JSON per ${art.name}`}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();

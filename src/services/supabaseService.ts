@@ -544,6 +544,115 @@ export async function migrateAllLocalDataToSupabase(artigiani: Artigiano[]): Pro
 }
 
 /**
+ * Ripristina o aggiorna completamente un singolo cliente su Supabase,
+ * sincronizzando con precisione tutti i suoi cantieri, movimenti e sospesi.
+ * Non tocca gli altri clienti presenti nel database.
+ */
+export async function restoreSingleArtigianoToSupabase(artigiano: Artigiano): Promise<void> {
+  if (!supabase || !isSupabaseConfigured()) return;
+
+  // 1. Upsert anagrafica Artigiano
+  const { error: artError } = await supabase.from('artigiani').upsert({
+    id: artigiano.id,
+    name: artigiano.name,
+    business_name: artigiano.businessName || null,
+    partita_iva: artigiano.partitaIva || null,
+    codice_fiscale: artigiano.codiceFiscale || null,
+    city: artigiano.city || 'Milano',
+    address: artigiano.address || null,
+    category: artigiano.category || 'misto',
+    phone: artigiano.phone || null,
+    email: artigiano.email || null,
+    year: artigiano.year || 2026,
+    notes: artigiano.notes || null,
+    quadratura: artigiano.quadratura || {},
+    magazzino: artigiano.magazzino || null,
+    updated_at: new Date().toISOString(),
+  });
+
+  if (artError) {
+    console.error('Errore upsert anagrafica durante ripristino cliente:', artError);
+    throw artError;
+  }
+
+  // 2. Rimuovi cantieri esistenti per questo cliente che non sono presenti nel backup da ripristinare
+  const { data: existingCantieri } = await supabase
+    .from('cantieri')
+    .select('id')
+    .eq('artigiano_id', artigiano.id);
+
+  const backupCantiereIds = new Set((artigiano.cantieri || []).map((c) => c.id));
+  const toDeleteCantieri = (existingCantieri || [])
+    .map((c: any) => c.id)
+    .filter((id: string) => !backupCantiereIds.has(id));
+
+  if (toDeleteCantieri.length > 0) {
+    await supabase.from('cantieri').delete().in('id', toDeleteCantieri);
+  }
+
+  // 3. Upsert di ciascun cantiere e dei relativi movimenti
+  for (const cantiere of artigiano.cantieri || []) {
+    await upsertCantiereToSupabase(artigiano.id, cantiere);
+  }
+
+  // 4. Rimuovi e aggiorna i sospesi per questo cliente
+  const { data: existingSospesi } = await supabase
+    .from('sospesi')
+    .select('id')
+    .eq('artigiano_id', artigiano.id);
+
+  const backupSospesiIds = new Set((artigiano.sospesi || []).map((s) => s.id));
+  const toDeleteSospesi = (existingSospesi || [])
+    .map((s: any) => s.id)
+    .filter((id: string) => !backupSospesiIds.has(id));
+
+  if (toDeleteSospesi.length > 0) {
+    await supabase.from('sospesi').delete().in('id', toDeleteSospesi);
+  }
+
+  if (artigiano.sospesi && artigiano.sospesi.length > 0) {
+    await bulkUpsertSospesiToSupabase(artigiano.id, artigiano.sospesi);
+  }
+}
+
+/**
+ * Ripristina un backup totale su Supabase.
+ * Se overwriteAll è true: rimuove i clienti che non fanno parte del backup per garantire un ripristino speculare.
+ * Poi esegue il ripristino/upsert pulito di ciascun cliente.
+ */
+export async function restoreFullBackupToSupabase(
+  artigiani: Artigiano[],
+  overwriteAll: boolean = false
+): Promise<{ count: number; error?: string }> {
+  if (!supabase || !isSupabaseConfigured()) {
+    return { count: artigiani.length };
+  }
+
+  try {
+    if (overwriteAll) {
+      const backupIds = new Set(artigiani.map((a) => a.id));
+      const { data: currentDbArts } = await supabase.from('artigiani').select('id');
+      const toDelete = (currentDbArts || [])
+        .map((a: any) => a.id)
+        .filter((id: string) => !backupIds.has(id));
+
+      if (toDelete.length > 0) {
+        await supabase.from('artigiani').delete().in('id', toDelete);
+      }
+    }
+
+    for (const art of artigiani) {
+      await restoreSingleArtigianoToSupabase(art);
+    }
+
+    return { count: artigiani.length };
+  } catch (err: any) {
+    console.error('Error during full restore to Supabase:', err);
+    return { count: 0, error: err?.message || 'Errore durante il ripristino su Supabase' };
+  }
+}
+
+/**
  * Subscribes to Supabase Realtime changes on all relevant tables.
  * When any table changes, triggers the onRemoteChange callback.
  * Returns an unsubscribe function.

@@ -261,3 +261,50 @@ export interface ItemAllocation {
     reasoning: string;
   };
 }
+
+export type BackupType = 'FULL_BACKUP' | 'SINGLE_CLIENT_BACKUP';
+
+export interface FullBackupPayload {
+  version: string;
+  type: 'FULL_BACKUP';
+  description: string;
+  exportedAt: string;
+  totalClients: number;
+  totalCantieri: number;
+  totalSospesi?: number;
+  artigiani: Artigiano[];
+}
+
+export interface SingleClientBackupPayload {
+  version: string;
+  type: 'SINGLE_CLIENT_BACKUP';
+  description: string;
+  exportedAt: string;
+  clientId: string;
+  clientName: string;
+  clientBusinessName?: string;
+  totalCantieri: number;
+  totalSospesi: number;
+  artigiano: Artigiano;
+  // Compatibilità per importatori che si aspettano l'array
+  artigiani?: Artigiano[];
+}
+
+export type BackupPayload = FullBackupPayload | SingleClientBackupPayload;
+
+export interface ParsedBackupInfo {
+  isValid: boolean;
+  error?: string;
+  type: BackupType | 'LEGACY';
+  version?: string;
+  exportedAt?: string;
+  totalClients: number;
+  clients: Artigiano[];
+  singleClientInfo?: {
+    id: string;
+    name: string;
+    businessName?: string;
+    cantieriCount: number;
+    sospesiCount: number;
+  };
+}
